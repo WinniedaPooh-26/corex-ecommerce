@@ -1,0 +1,62 @@
+[
+  {
+    "tab": "women",
+    "product": "COREX Essential Sports Bra",
+    "filename": "women__corex-essential-sports-bra.png",
+    "relativePath": "assets/images/corex-products/women__corex-essential-sports-bra.png"
+  },
+  {
+    "tab": "women",
+    "product": "COREX Flow Leggings",
+    "filename": "women__corex-flow-leggings.png",
+    "relativePath": "assets/images/corex-products/women__corex-flow-leggings.png"
+  },
+  {
+    "tab": "men",
+    "product": "COREX Performance Tee",
+    "filename": "men__corex-performance-tee.png",
+    "relativePath": "assets/images/corex-products/men__corex-performance-tee.png"
+  },
+  {
+    "tab": "men",
+    "product": "COREX Training Tank",
+    "filename": "men__corex-training-tank.png",
+    "relativePath": "assets/images/corex-products/men__corex-training-tank.png"
+  },
+  {
+    "tab": "yoga",
+    "product": "COREX Yoga Tank Top",
+    "filename": "yoga__corex-yoga-tank-top.png",
+    "relativePath": "assets/images/corex-products/yoga__corex-yoga-tank-top.png"
+  },
+  {
+    "tab": "yoga",
+    "product": "COREX Seamless Leggings",
+    "filename": "yoga__corex-seamless-leggings.png",
+    "relativePath": "assets/images/corex-products/yoga__corex-seamless-leggings.png"
+  },
+  {
+    "tab": "accessories",
+    "product": "COREX Yoga Mat",
+    "filename": "accessories__corex-yoga-mat.png",
+    "relativePath": "assets/images/corex-products/accessories__corex-yoga-mat.png"
+  },
+  {
+    "tab": "accessories",
+    "product": "COREX Gym Backpack",
+    "filename": "accessories__corex-gym-backpack.png",
+    "relativePath": "assets/images/corex-products/accessories__corex-gym-backpack.png"
+  },
+  {
+    "tab": "new-arrival",
+    "product": "COREX Active Set",
+    "filename": "new-arrival__corex-active-set.png",
+    "relativePath": "assets/images/corex-products/new-arrival__corex-active-set.png"
+  },
+  {
+    "tab": "new-arrival",
+    "product": "COREX Elevate Zip Jacket",
+    "filename": "new-arrival__corex-elevate-zip-jacket.png",
+    "relativePath": "assets/images/corex-products/new-arrival__corex-elevate-zip-jacket.png"
+  }
+]
