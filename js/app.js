@@ -164,7 +164,8 @@ const PRODUCTS = [
     galleryImages: ["images/women_7.png"],
     description: "High-waist leggings with compression fit for yoga classes or intense cardio routines.",
     features: ["High Waisted", "4-Way Stretch", "Eco Friendly"],
-    badge: null
+    isBestSeller: true,
+    badge: "Best Seller"
   },
   {
     id: 8,
@@ -189,7 +190,8 @@ const PRODUCTS = [
     galleryImages: ["images/women_8.png"],
     description: "Lightweight, breathable training shorts with a sweat-wicking liner and hidden pocket.",
     features: ["Sweat Wicking", "Inner Liner", "Waistband Pocket"],
-    badge: null
+    isBestSeller: true,
+    badge: "Best Seller"
   },
   {
     id: 9,
@@ -321,7 +323,8 @@ const PRODUCTS = [
     galleryImages: ["images/men_4.png"],
     description: "A second-skin compression top that wraps and supports major muscle groups, boosting circulation.",
     features: ["High Compression", "Muscular Support", "Quick Dry"],
-    badge: null
+    isBestSeller: true,
+    badge: "Best Seller"
   },
   {
     id: 15,
@@ -372,7 +375,8 @@ const PRODUCTS = [
     galleryImages: ["images/men_6.png"],
     description: "Tapered-leg joggers with dynamic knee articulation and zippered security pockets.",
     features: ["Tapered Fit", "Zip Pockets", "Drawcord Waist"],
-    badge: null
+    isBestSeller: true,
+    badge: "Best Seller"
   },
   {
     id: 17,
@@ -1475,6 +1479,12 @@ const state = {
   currentView: "home"
 };
 
+function formatPrice(usdPrice) {
+  if (!usdPrice && usdPrice !== 0) return "";
+  const vndPrice = usdPrice * 25000;
+  return vndPrice.toLocaleString("vi-VN") + " đ";
+}
+
 // ==========================================
 // 3. STORAGE ENGINE
 // ==========================================
@@ -1987,11 +1997,11 @@ function createProductCard(product) {
     stars += `<svg viewBox="0 0 24 24" style="${i < fullStars ? 'fill: #F5A623; stroke: #F5A623;' : 'fill: none; stroke: #ccc;'}"><polygon points="12,2 15,9 22,9 17,14 19,21 12,17 5,21 7,14 2,9 9,9" /></svg>`;
   }
 
-  let priceHTML = `<span class="product-card-price">$${product.price.toFixed(2)}</span>`;
+  let priceHTML = `<span class="product-card-price">${formatPrice(product.price)}</span>`;
   if (product.oldPrice) {
     priceHTML = `
-      <span class="product-card-price has-sale">$${product.price.toFixed(2)}</span>
-      <span class="product-card-price-old">$${product.oldPrice.toFixed(2)}</span>
+      <span class="product-card-price has-sale">${formatPrice(product.price)}</span>
+      <span class="product-card-price-old">${formatPrice(product.oldPrice)}</span>
     `;
   }
 
@@ -2254,7 +2264,7 @@ function renderActiveFilterPills() {
     hasFilters = true;
     const min = state.activeFilters.priceMin || "0";
     const max = state.activeFilters.priceMax || "Any";
-    createPill(row, "price", "range", `$${min} - $${max}`, () => {
+    createPill(row, "price", "range", `${formatPrice(parseFloat(min))} - ${formatPrice(parseFloat(max))}`, () => {
       state.activeFilters.priceMin = "";
       state.activeFilters.priceMax = "";
       const minVal = document.getElementById("price-min");
@@ -2357,11 +2367,11 @@ function renderProductDetailView() {
   if (priceBox) {
     if (prod.oldPrice) {
       priceBox.innerHTML = `
-        <span class="detail-price has-sale">$${prod.price.toFixed(2)}</span>
-        <span class="detail-price-old">$${prod.oldPrice.toFixed(2)}</span>
+        <span class="detail-price has-sale">${formatPrice(prod.price)}</span>
+        <span class="detail-price-old">${formatPrice(prod.oldPrice)}</span>
       `;
     } else {
-      priceBox.innerHTML = `<span class="detail-price">$${prod.price.toFixed(2)}</span>`;
+      priceBox.innerHTML = `<span class="detail-price">${formatPrice(prod.price)}</span>`;
     }
   }
 
@@ -2641,7 +2651,7 @@ function renderCartView() {
       </div>
       
       <div class="cart-item-price-col" style="font-weight:600;">
-        $${item.product.price.toFixed(2)}
+        ${formatPrice(item.product.price)}
       </div>
       
       <div class="cart-item-quantity">
@@ -2653,7 +2663,7 @@ function renderCartView() {
       </div>
       
       <div class="cart-item-total" style="font-weight:700; font-size:1.05rem;">
-        $${itemTotal.toFixed(2)}
+        ${formatPrice(itemTotal)}
       </div>
       
       <button class="cart-item-remove-btn" title="Remove Item">
@@ -2724,7 +2734,7 @@ function renderCartSummary() {
     const diff = (shipThreshold - subtotalAfterDiscount).toFixed(2);
     progressTextHTML = `
       <div class="free-ship-progress-box" style="margin-bottom: 1.5rem; background-color: var(--card-bg); padding: 12px; border-radius: var(--radius-sm); text-align: center; border: 1px solid var(--border-color);">
-        <p style="font-size: 0.82rem; font-weight: 600; color: var(--accent-primary);">You're $${diff} away from free shipping!</p>
+        <p style="font-size: 0.82rem; font-weight: 600; color: var(--accent-primary);">You're ${formatPrice(parseFloat(diff))} away from free shipping!</p>
         <div style="background-color: var(--border-color); height: 6px; border-radius: 3px; margin-top: 8px; overflow: hidden;">
           <div style="background-color: var(--accent-primary); height: 100%; width: ${Math.min(100, (subtotalAfterDiscount / shipThreshold) * 100)}%; transition: width 0.3s ease;"></div>
         </div>
@@ -2745,16 +2755,16 @@ function renderCartSummary() {
 
     <div class="summary-row">
       <span>Subtotal</span>
-      <span>$${subtotal.toFixed(2)}</span>
+      <span>${formatPrice(subtotal)}</span>
     </div>
     ${discount > 0 ? `
     <div class="summary-row" style="color:var(--accent-primary);">
       <span>Discount (10%)</span>
-      <span>-$${discount.toFixed(2)}</span>
+      <span>-${formatPrice(discount)}</span>
     </div>` : ""}
     <div class="summary-row">
       <span>Shipping ${subtotalAfterDiscount >= shipThreshold ? " (Free over $75)" : ""}</span>
-      <span>${shipping === 0 ? "FREE" : `$${shipping.toFixed(2)}`}</span>
+      <span>${shipping === 0 ? "FREE" : formatPrice(shipping)}</span>
     </div>
     <div class="coupon-section">
       <label class="detail-option-label" style="font-size:0.75rem;">Promo Code</label>
@@ -2766,7 +2776,7 @@ function renderCartSummary() {
     </div>
     <div class="summary-row total-row">
       <span>Total</span>
-      <span>$${total.toFixed(2)}</span>
+      <span>${formatPrice(total)}</span>
     </div>
     <button class="btn btn-primary btn-full" onclick="navigateTo('checkout')">Proceed to Checkout</button>
     <button class="btn btn-link btn-full" style="margin-top:1rem; text-align:center;" onclick="navigateTo('shop')">Continue Shopping</button>
@@ -2836,9 +2846,9 @@ function renderCheckoutView() {
       <div class="checkout-item-info">
         <h4 class="checkout-item-name">${item.product.name}</h4>
         <span class="checkout-item-variant">Size: ${item.size} | Color: ${item.color.name}</span>
-        <div class="checkout-item-qty-price">Qty: ${item.quantity} × $${item.product.price.toFixed(2)}</div>
+        <div class="checkout-item-qty-price">Qty: ${item.quantity} × ${formatPrice(item.product.price)}</div>
       </div>
-      <div class="checkout-item-price">$${(item.product.price * item.quantity).toFixed(2)}</div>
+      <div class="checkout-item-price">${formatPrice(item.product.price * item.quantity)}</div>
     `;
     list.appendChild(el);
   });
@@ -2902,18 +2912,18 @@ function recalcCheckoutTotals() {
 
   const grandTotal = subtotal - discount + shipFee;
 
-  document.getElementById("checkout-subtotal").textContent = `$${subtotal.toFixed(2)}`;
+  document.getElementById("checkout-subtotal").textContent = formatPrice(subtotal);
   
   const discountRow = document.getElementById("checkout-discount-row");
   if (discount > 0) {
     discountRow.style.display = "flex";
-    document.getElementById("checkout-discount").textContent = `-$${discount.toFixed(2)}`;
+    document.getElementById("checkout-discount").textContent = `-${formatPrice(discount)}`;
   } else {
     discountRow.style.display = "none";
   }
 
-  document.getElementById("checkout-shipping").textContent = shipFee === 0 ? "FREE" : `$${shipFee.toFixed(2)}`;
-  document.getElementById("checkout-total").textContent = `$${grandTotal.toFixed(2)}`;
+  document.getElementById("checkout-shipping").textContent = shipFee === 0 ? "FREE" : formatPrice(shipFee);
+  document.getElementById("checkout-total").textContent = formatPrice(grandTotal);
 }
 
 function validateCheckoutForm() {
@@ -2993,7 +3003,7 @@ function processOrderSuccess() {
   document.getElementById("success-order-id").textContent = orderId;
   document.getElementById("success-order-date").textContent = date;
   document.getElementById("success-order-payment").textContent = getPaymentMethodLabel(activePaymentMethod);
-  document.getElementById("success-order-total").textContent = `$${total.toFixed(2)}`;
+  document.getElementById("success-order-total").textContent = formatPrice(total);
 
   state.cart = [];
   state.activeCoupon = null;
