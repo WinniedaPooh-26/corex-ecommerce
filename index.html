@@ -875,6 +875,19 @@
       </div>
     </section>
 
+
+    <!-- =========================================
+      VIEW H: ADMIN DASHBOARD (embedded primary route)
+    ========================================= -->
+    <section id="admin-view" class="view-section admin-route-view" aria-label="COREX Admin Dashboard">
+      <iframe
+        id="admin-dashboard-frame"
+        class="admin-dashboard-frame"
+        title="COREX Admin Dashboard"
+        src="about:blank"
+        loading="eager"
+      ></iframe>
+    </section>
   </main>
 
   <!-- =========================================
@@ -986,6 +999,7 @@
             <a href="#" class="footer-link">Shipping & Delivery</a>
             <a href="#" class="footer-link">Returns & Refunds</a>
             <a href="#" class="footer-link">Contact COREX</a>
+            <a href="#admin" onclick="navigateTo('admin'); return false;" class="footer-link">Admin Portal</a>
           </div>
         </div>
 
@@ -1015,6 +1029,8 @@
     </div>
   </footer>
 
+  <script src="js/venv.js"></script>
+  <script src="js/mockapi-client.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

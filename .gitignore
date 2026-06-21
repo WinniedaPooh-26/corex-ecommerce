@@ -1,0 +1,11 @@
+# Backups
+*.bak
+
+# Temporary files / screenshots
+tmp-*.png
+
+# OS/IDE metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

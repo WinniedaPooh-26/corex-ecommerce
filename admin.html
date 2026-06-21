@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>COREX Admin Dashboard</title>
+  <meta name="description" content="COREX admin dashboard for MockAPI product and customer management.">
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="admin-body">
+  <div id="admin-login-screen" class="admin-login-screen">
+    <section class="login-panel" aria-labelledby="admin-login-title">
+      <a href="index.html#home" target="_top" class="admin-brand" aria-label="Return to COREX store">CORE<span>X</span></a>
+      <p class="eyebrow">ADMIN CONTROL CENTER</p>
+      <h1 id="admin-login-title">Manage COREX</h1>
+      <p class="login-copy">Control products, customer accounts, purchase totals and membership vouchers from one dashboard.</p>
+      <form id="admin-login-form" class="admin-login-form">
+        <label>
+          Email
+          <input id="admin-email" type="email" value="admin@corex.com" autocomplete="username" required>
+        </label>
+        <label>
+          Password
+          <input id="admin-password" type="password" value="01" autocomplete="current-password" required>
+        </label>
+        <button class="primary-btn" type="submit">Sign in to dashboard</button>
+      </form>
+      <p class="demo-note">Demo credentials are fixed: <strong>admin@corex.com</strong> / <strong>01</strong>.</p>
+      <p id="admin-login-error" class="form-alert" role="alert"></p>
+    </section>
+    <aside class="login-art" aria-hidden="true">
+      <div class="login-orb orb-one"></div>
+      <div class="login-orb orb-two"></div>
+      <div class="login-art-copy">
+        <span>COREX</span>
+        <strong>Move better.<br>Manage smarter.</strong>
+      </div>
+    </aside>
+  </div>
+
+  <div id="admin-dashboard" class="admin-dashboard" hidden>
+    <aside class="admin-sidebar">
+      <div>
+        <a href="index.html#home" target="_top" class="admin-brand sidebar-brand">CORE<span>X</span></a>
+        <p class="sidebar-caption">ADMIN CONTROL CENTER</p>
+      </div>
+      <nav class="admin-nav" aria-label="Admin navigation">
+        <button class="admin-nav-btn active" data-admin-tab="overview"><span>◫</span> Overview</button>
+        <button class="admin-nav-btn" data-admin-tab="products"><span>◈</span> Products</button>
+        <button class="admin-nav-btn" data-admin-tab="users"><span>◎</span> Accounts</button>
+        <button class="admin-nav-btn" data-admin-tab="memberships"><span>◇</span> Memberships</button>
+      </nav>
+      <div class="sidebar-footer">
+        <a class="store-link" href="index.html">← View storefront</a>
+        <button id="admin-logout-btn" class="text-btn">Sign out</button>
+      </div>
+    </aside>
+
+    <main class="admin-main">
+      <header class="admin-topbar">
+        <div>
+          <p class="eyebrow">COREX OPERATIONS</p>
+          <h1 id="admin-page-title">Dashboard overview</h1>
+        </div>
+        <div class="topbar-actions">
+          <span id="api-status" class="api-status">Checking MockAPI…</span>
+          <button id="refresh-data-btn" class="outline-btn">↻ Refresh</button>
+        </div>
+      </header>
+
+      <section id="overview-panel" class="admin-panel active" data-panel="overview">
+        <div class="metric-grid">
+          <article class="metric-card"><span class="metric-label">Products</span><strong id="metric-products">0</strong><small>MockAPI product records</small></article>
+          <article class="metric-card"><span class="metric-label">Customer accounts</span><strong id="metric-users">0</strong><small>Excludes admin accounts</small></article>
+          <article class="metric-card"><span class="metric-label">Customer spending</span><strong id="metric-spend">0 ₫</strong><small>Total customer value</small></article>
+          <article class="metric-card"><span class="metric-label">Active Platinum</span><strong id="metric-platinum">0</strong><small>15% voucher tier</small></article>
+        </div>
+
+        <div class="dashboard-grid">
+          <section class="surface-card">
+            <div class="surface-heading">
+              <div><p class="eyebrow">CATALOG</p><h2>MockAPI synchronization</h2></div>
+              <button id="seed-catalog-btn" class="primary-btn small-btn">Seed missing catalog</button>
+            </div>
+            <p class="surface-copy">If the <code>Product</code> resource is empty, this pushes the local COREX catalog to MockAPI. Existing API records are not overwritten by this action.</p>
+            <div class="sync-summary">
+              <div><span>Product endpoint</span><strong id="endpoint-products">/Product</strong></div>
+              <div><span>User endpoint</span><strong id="endpoint-users">/users</strong></div>
+            </div>
+          </section>
+          <section class="surface-card">
+            <div class="surface-heading">
+              <div><p class="eyebrow">VOUCHERS</p><h2>Tier policy</h2></div>
+            </div>
+            <div id="tier-policy-list" class="tier-policy-list"></div>
+          </section>
+        </div>
+
+        <section class="surface-card table-card">
+          <div class="surface-heading"><div><p class="eyebrow">RECENT ACCOUNTS</p><h2>Newest customer registrations</h2></div><button class="text-btn" data-jump-tab="users">View all accounts →</button></div>
+          <div class="responsive-table"><table><thead><tr><th>Customer</th><th>Role</th><th>Total purchases</th><th>Applied voucher</th><th>Created</th></tr></thead><tbody id="recent-users-table"></tbody></table></div>
+        </section>
+      </section>
+
+      <section id="products-panel" class="admin-panel" data-panel="products">
+        <div class="section-toolbar">
+          <div class="toolbar-search"><input id="product-search" type="search" placeholder="Search product name, category or tag"></div>
+          <div class="toolbar-actions"><button id="sync-products-btn" class="outline-btn">Sync missing local products</button><button id="new-product-btn" class="primary-btn">+ Add product</button></div>
+        </div>
+        <section class="surface-card table-card">
+          <div class="responsive-table"><table class="admin-table"><thead><tr><th>Product</th><th>Collection</th><th>Price</th><th>Stock</th><th>Sold</th><th>Labels</th><th>Actions</th></tr></thead><tbody id="products-table"></tbody></table></div>
+        </section>
+      </section>
+
+      <section id="users-panel" class="admin-panel" data-panel="users">
+        <div class="section-toolbar">
+          <div class="toolbar-search"><input id="user-search" type="search" placeholder="Search name, email or role"></div>
+          <div class="toolbar-actions"><button id="new-user-btn" class="primary-btn">+ Add account</button></div>
+        </div>
+        <section class="surface-card table-card">
+          <div class="responsive-table"><table class="admin-table"><thead><tr><th>Account</th><th>Role</th><th>Orders</th><th>Total purchases</th><th>Tier / voucher</th><th>Actions</th></tr></thead><tbody id="users-table"></tbody></table></div>
+        </section>
+      </section>
+
+      <section id="memberships-panel" class="admin-panel" data-panel="memberships">
+        <div class="section-toolbar">
+          <div><p class="eyebrow">CUSTOMER RETENTION</p><h2>Membership and voucher eligibility</h2></div>
+          <div class="toolbar-actions"><button id="apply-vouchers-btn" class="primary-btn">Apply / refresh all vouchers</button></div>
+        </div>
+        <section class="surface-card table-card">
+          <div class="membership-explainer">A tier is earned from lifetime spending. To keep its voucher, a customer must spend at least 20% of that tier’s entry threshold during the current month. When the requirement is missed, the currently applied voucher falls to the highest tier whose maintenance requirement is met.</div>
+          <div class="responsive-table"><table class="admin-table"><thead><tr><th>Customer</th><th>Lifetime spend</th><th>Current-month spend</th><th>Earned tier</th><th>Applied voucher</th><th>Maintenance</th><th>Action</th></tr></thead><tbody id="memberships-table"></tbody></table></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <div id="admin-modal" class="admin-modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="admin-modal-title">
+      <div class="modal-header"><div><p id="admin-modal-kicker" class="eyebrow"></p><h2 id="admin-modal-title">Edit record</h2></div><button id="close-modal-btn" class="icon-btn" aria-label="Close">×</button></div>
+      <form id="admin-modal-form" class="modal-form"></form>
+    </div>
+  </div>
+
+  <div id="admin-toast" class="admin-toast" role="status" aria-live="polite"></div>
+
+  <script src="js/venv.js"></script>
+  <script src="js/mockapi-client.js"></script>
+  <script src="js/catalog-seed.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>

@@ -3730,3 +3730,47 @@ footer {
   color: #333333;
   border: 1px solid #e0e0e0;
 }
+
+
+/* Primary-route admin dashboard: index.html#admin */
+.admin-route-view {
+  width: 100%;
+  min-height: calc(100vh - 80px);
+  padding: 0;
+  background: #f5f2ef;
+}
+
+.admin-dashboard-frame {
+  display: block;
+  width: 100%;
+  min-height: calc(100vh - 80px);
+  height: calc(100vh - 80px);
+  border: 0;
+  background: #f5f2ef;
+}
+
+body.corex-admin-route > header,
+body.corex-admin-route > footer {
+  display: none;
+}
+
+body.corex-admin-route > main {
+  min-height: 100vh;
+}
+
+body.corex-admin-route .admin-route-view {
+  min-height: 100vh;
+}
+
+body.corex-admin-route .admin-dashboard-frame {
+  min-height: 100vh;
+  height: 100vh;
+}
+
+@media (max-width: 767px) {
+  .admin-dashboard-frame,
+  body.corex-admin-route .admin-dashboard-frame {
+    min-height: 100vh;
+    height: 100vh;
+  }
+}

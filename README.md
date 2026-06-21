@@ -49,3 +49,7 @@ corex-ecommerce/
 - Best Seller cards reuse the same catalog products rendered in their respective menu tabs, with a shared `isBestSeller: true` source of truth.
 - Product images are stored locally under `images/`; product data no longer depends on remote product-image URLs.
 - See `SOURCE_AUDIT.md` for the selected Best Seller products and image verification results.
+
+## Admin dashboard (MockAPI)
+
+Open `admin.html` to manage Products and Users through MockAPI. The runtime URL is in `js/venv.js` and the fixed demo login is `admin@corex.com` / `01`. See `MOCKAPI_ADMIN_SETUP.md` for resource fields, catalog seeding, membership/voucher rules, and prototype security limitations.

@@ -5,7 +5,7 @@
 // ==========================================
 // 1. PRODUCT DATABASE (EXACTLY ALIGNED WITH demo.png SPECIFICATIONS)
 // ==========================================
-const PRODUCTS = [
+let PRODUCTS = [
   // ==========================================
   // 1. WOMEN TAB PRODUCTS (ID 1-10)
   // ==========================================
@@ -1425,6 +1425,46 @@ const PRODUCTS = [
   }
 ];
 
+// Shared source snapshot used by MockAPI bootstrap and admin catalog sync.
+window.COREX_LOCAL_PRODUCTS = JSON.parse(JSON.stringify(PRODUCTS));
+
+async function mergeMockApiCatalogIntoStorefront() {
+  if (!window.CorexMockApi) return;
+
+  try {
+    const remoteProducts = await window.CorexMockApi.listProducts();
+    if (!Array.isArray(remoteProducts) || remoteProducts.length === 0) return;
+
+    const merged = [...PRODUCTS];
+    remoteProducts
+      .filter(record => record && (record.corexManaged || record.legacyId !== undefined || record.name))
+      .forEach(record => {
+        const normalized = window.CorexMockApi.normalizeProduct(record);
+        const index = merged.findIndex(product =>
+          String(product.id) === String(normalized.id) ||
+          (product.name && normalized.name && product.name === normalized.name)
+        );
+        if (index >= 0) {
+          merged[index] = { ...merged[index], ...normalized };
+        } else if (normalized.name && normalized.imageUrl) {
+          merged.push(normalized);
+        }
+      });
+
+    PRODUCTS = merged;
+    window.COREX_LOCAL_PRODUCTS = JSON.parse(JSON.stringify(PRODUCTS));
+
+    // Refresh the view only after MockAPI has returned valid records.
+    if (document.readyState !== "loading") {
+      restoreRouteFromLocation();
+      renderHomeView();
+    }
+  } catch (error) {
+    console.warn("COREX: MockAPI catalog is unavailable. Local catalog remains active.", error);
+  }
+}
+
+
 // ==========================================
 // 1.1 COLLECTION + BADGE HELPERS
 // The homepage best-seller modules reuse the exact same product
@@ -1440,15 +1480,21 @@ const COLLECTION_RANGES = Object.freeze({
 });
 
 function getCollectionProducts(collection) {
-  const range = COLLECTION_RANGES[collection];
+  const normalizedCollection = String(collection || "").toLowerCase();
+  const range = COLLECTION_RANGES[normalizedCollection];
   if (!range) return [...PRODUCTS];
   const [start, end] = range;
-  return PRODUCTS.filter(product => product.id >= start && product.id <= end);
+  return PRODUCTS.filter(product => {
+    const productCollection = String(product.collection || product.group || "").toLowerCase();
+    return productCollection === normalizedCollection || (Number(product.id) >= start && Number(product.id) <= end);
+  });
 }
 
 function getProductCollection(product) {
+  const explicitCollection = String(product.collection || product.group || "").toLowerCase();
+  if (COLLECTION_RANGES[explicitCollection]) return explicitCollection;
   return Object.entries(COLLECTION_RANGES)
-    .find(([, range]) => product.id >= range[0] && product.id <= range[1])?.[0] || "all";
+    .find(([, range]) => Number(product.id) >= range[0] && Number(product.id) <= range[1])?.[0] || "all";
 }
 
 function getProductBadge(product) {
@@ -1565,7 +1611,7 @@ function showToast(message, type = "success") {
 // ==========================================
 // 5. VIEW ROUTER
 // ==========================================
-const ROUTABLE_VIEWS = new Set(["home", "shop", "detail", "cart", "checkout", "wishlist", "success"]);
+const ROUTABLE_VIEWS = new Set(["home", "shop", "detail", "cart", "checkout", "wishlist", "success", "admin"]);
 
 function buildRouteHash(view, params = {}) {
   const safeView = ROUTABLE_VIEWS.has(view) ? view : "home";
@@ -1628,6 +1674,7 @@ function navigateTo(view, params = {}, options = {}) {
 
   const safeView = ROUTABLE_VIEWS.has(view) ? view : "home";
   state.currentView = safeView;
+  document.body.classList.toggle("corex-admin-route", safeView === "admin");
   window.scrollTo({ top: 0, behavior: "auto" });
 
   document.querySelectorAll(".view-section").forEach(section => {
@@ -1675,6 +1722,13 @@ function navigateTo(view, params = {}, options = {}) {
     renderCheckoutView();
   } else if (safeView === "wishlist") {
     renderWishlistView();
+  } else if (safeView === "admin") {
+    // Keep the admin control center under the same public COREX URL: #admin.
+    // The iframe shares the same origin/session and retains the existing admin CRUD code.
+    const adminFrame = document.getElementById("admin-dashboard-frame");
+    if (adminFrame && (!adminFrame.getAttribute("src") || adminFrame.getAttribute("src") === "about:blank")) {
+      adminFrame.setAttribute("src", "admin.html?embedded=1");
+    }
   }
 
   updateBadges();
@@ -3005,6 +3059,35 @@ function processOrderSuccess() {
   document.getElementById("success-order-payment").textContent = getPaymentMethodLabel(activePaymentMethod);
   document.getElementById("success-order-total").textContent = formatPrice(total);
 
+  // Store the order against the signed-in customer in MockAPI when available.
+  // The dashboard later uses this data to calculate total spending and membership vouchers.
+  if (state.currentUser?.id && window.CorexMockApi) {
+    const orderRecord = {
+      orderId,
+      createdAt: new Date().toISOString(),
+      totalVnd: Math.round(total * 25000),
+      totalUsd: total,
+      items: state.cart.map(item => ({
+        productId: item.product.id,
+        productName: item.product.name,
+        quantity: item.quantity,
+        size: item.size,
+        color: item.color?.name || ""
+      })),
+      paymentMethod: activePaymentMethod,
+      status: "pending"
+    };
+
+    window.CorexMockApi.recordCustomerOrder(state.currentUser, orderRecord)
+      .then(updatedUser => {
+        if (updatedUser) {
+          state.currentUser = { ...state.currentUser, ...updatedUser };
+          saveToStorage();
+        }
+      })
+      .catch(error => console.warn("COREX: order was completed locally but could not be synced to MockAPI.", error));
+  }
+
   state.cart = [];
   state.activeCoupon = null;
   saveToStorage();
@@ -3168,11 +3251,11 @@ function bindAuthModal() {
         <form class="auth-form" id="login-form">
           <div class="form-group">
             <label for="login-email">Email Address</label>
-            <input type="email" id="login-email" required placeholder="demo@corex.com" value="demo@corex.com">
+            <input type="email" id="login-email" required placeholder="you@example.com">
           </div>
           <div class="form-group">
             <label for="login-password">Password</label>
-            <input type="password" id="login-password" required placeholder="••••••••" value="password123">
+            <input type="password" id="login-password" required placeholder="••••••••">
           </div>
           <button type="submit" class="btn btn-primary btn-full" style="margin-top:0.5rem;">Log In</button>
         </form>
@@ -3181,17 +3264,46 @@ function bindAuthModal() {
         </div>
       `;
 
-      document.getElementById("login-form").onsubmit = (e) => {
+      document.getElementById("login-form").onsubmit = async (e) => {
         e.preventDefault();
-        const email = document.getElementById("login-email").value.trim();
-        
-        state.currentUser = {
-          name: "Demo Customer",
-          email: email
-        };
-        saveToStorage();
-        showToast("Welcome to COREX!", "success");
-        renderAuthCardContent();
+        const email = document.getElementById("login-email").value.trim().toLowerCase();
+        const password = document.getElementById("login-password").value;
+
+        try {
+          if (!window.CorexMockApi) throw new Error("MockAPI configuration is unavailable.");
+          // The fixed admin account is available from a fresh MockAPI project as well.
+          // The admin page will create/update its remote record before opening the dashboard.
+          if (window.CorexMockApi.isFixedAdminCredentials(email, password)) {
+            state.currentUser = { name: "COREX Administrator", email, role: "admin" };
+            saveToStorage();
+            sessionStorage.setItem("corex_admin_session", "true");
+            toggleModal(false);
+            navigateTo("admin");
+            return;
+          }
+          const users = await window.CorexMockApi.listUsers();
+          const user = users.find(item => String(item.email || "").toLowerCase() === email && String(item.password || "") === password);
+          if (!user) {
+            showToast("Incorrect email or password.", "error");
+            return;
+          }
+
+          state.currentUser = { ...user, name: user.name || user.fullName || "COREX Customer" };
+          saveToStorage();
+
+          if (user.role === "admin") {
+            sessionStorage.setItem("corex_admin_session", "true");
+            toggleModal(false);
+            navigateTo("admin");
+            return;
+          }
+
+          showToast("Welcome back to COREX!", "success");
+          renderAuthCardContent();
+        } catch (error) {
+          console.error("COREX login failed:", error);
+          showToast("Could not sign in because the account service is unavailable.", "error");
+        }
       };
 
       document.getElementById("go-register-btn").onclick = () => {
@@ -3224,18 +3336,38 @@ function bindAuthModal() {
       </div>
     `;
 
-    document.getElementById("register-form").onsubmit = (e) => {
+    document.getElementById("register-form").onsubmit = async (e) => {
       e.preventDefault();
       const name = document.getElementById("reg-name").value.trim();
-      const email = document.getElementById("reg-email").value.trim();
+      const email = document.getElementById("reg-email").value.trim().toLowerCase();
+      const password = document.getElementById("reg-password").value;
 
-      state.currentUser = {
-        name,
-        email
-      };
-      saveToStorage();
-      showToast("Account created successfully!", "success");
-      renderAuthCardContent();
+      try {
+        if (!window.CorexMockApi) throw new Error("MockAPI configuration is unavailable.");
+        const users = await window.CorexMockApi.listUsers();
+        if (users.some(user => String(user.email || "").toLowerCase() === email)) {
+          showToast("An account with this email already exists.", "error");
+          return;
+        }
+
+        const created = await window.CorexMockApi.createUser(window.CorexMockApi.userPayload({
+          name,
+          email,
+          password,
+          role: "customer",
+          orders: [],
+          totalSpentVnd: 0,
+          monthlySpendVnd: 0
+        }));
+
+        state.currentUser = { ...created, name: created.name || name };
+        saveToStorage();
+        showToast("Account created successfully!", "success");
+        renderAuthCardContent();
+      } catch (error) {
+        console.error("COREX registration failed:", error);
+        showToast("Could not create account because the account service is unavailable.", "error");
+      }
     };
 
     document.getElementById("go-login-btn").onclick = () => {
@@ -3365,5 +3497,18 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   window.addEventListener("hashchange", restoreRouteFromLocation);
+  window.addEventListener("message", (event) => {
+    if (event.origin !== window.location.origin || event.data?.source !== "corex-admin") return;
+    if (event.data.type === "logout") {
+      state.currentUser = null;
+      saveToStorage();
+      navigateTo("home");
+      showToast("Administrator signed out.");
+    }
+  });
   restoreRouteFromLocation();
+
+  // Pull remote product changes when MockAPI already contains the COREX catalog.
+  // Local data remains a safe fallback if the mock endpoint is unavailable.
+  mergeMockApiCatalogIntoStorefront();
 });
