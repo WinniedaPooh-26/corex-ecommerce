@@ -1441,8 +1441,7 @@ async function mergeMockApiCatalogIntoStorefront() {
       .forEach(record => {
         const normalized = window.CorexMockApi.normalizeProduct(record);
         const index = merged.findIndex(product =>
-          String(product.id) === String(normalized.id) ||
-          (product.name && normalized.name && product.name === normalized.name)
+          String(product.id) === String(normalized.id)
         );
         if (index >= 0) {
           merged[index] = { ...merged[index], ...normalized };
