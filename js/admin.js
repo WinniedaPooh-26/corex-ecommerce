@@ -8,10 +8,36 @@
 
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => [...document.querySelectorAll(selector)];
-  const formatVnd = (value) => `${Number(value || 0).toLocaleString("vi-VN")} ₫`;
-  const formatUsd = (value) => `$${Number(value || 0).toFixed(2)}`;
+  const VND_PER_PRICE_UNIT = 25000;
+  const formatVnd = (value) => `${Math.round(Number(value || 0)).toLocaleString("vi-VN")} ₫`;
+  // Legacy product records store a compact price unit. Admin always views and edits VNĐ.
+  const formatCatalogVnd = (priceUnit) => formatVnd(Number(priceUnit || 0) * VND_PER_PRICE_UNIT);
+  const toCatalogPriceUnit = (vndValue) => Number(vndValue || 0) / VND_PER_PRICE_UNIT;
   const dateText = (value) => value ? new Date(value).toLocaleDateString("vi-VN") : "—";
   const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#039;", '"': "&quot;" }[ch]));
+
+  function readMainSessionUser() {
+    try {
+      const storage = window.parent && window.parent !== window ? window.parent.localStorage : window.localStorage;
+      const raw = storage.getItem("corex_user");
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function hasExplicitAdminSession() {
+    try {
+      const storage = window.parent && window.parent !== window ? window.parent.localStorage : window.localStorage;
+      const user = readMainSessionUser();
+      const expected = String(config.ADMIN_EMAIL || "admin@corex.com").toLowerCase();
+      return storage.getItem("corex_admin_session") === "true"
+        && user && String(user.role || "").toLowerCase() === "admin"
+        && String(user.email || "").toLowerCase() === expected;
+    } catch (_) {
+      return false;
+    }
+  }
 
   function showToast(message, type = "success") {
     const element = $("#admin-toast");
@@ -82,8 +108,8 @@
         <label>Category<input name="category" value="${escapeHtml(product.category || "Yoga")}" required></label>
         <label>Subcategory<input name="subCategory" value="${escapeHtml(product.subCategory || "Tops")}"></label>
         <label>Gender<select name="gender"><option value="women" ${product.gender === "women" ? "selected" : ""}>Women</option><option value="men" ${product.gender === "men" ? "selected" : ""}>Men</option><option value="unisex" ${product.gender === "unisex" ? "selected" : ""}>Unisex</option></select></label>
-        <label>Price (USD)<input name="price" type="number" min="0" step="0.01" value="${Number(product.price || 0)}" required></label>
-        <label>Old price (USD)<input name="oldPrice" type="number" min="0" step="0.01" value="${product.oldPrice ?? ""}"></label>
+        <label>Price (VNĐ)<input name="price" type="number" min="0" step="1000" value="${Math.round(Number(product.price || 0) * VND_PER_PRICE_UNIT)}" required></label>
+        <label>Old price (VNĐ)<input name="oldPrice" type="number" min="0" step="1000" value="${product.oldPrice === null || product.oldPrice === undefined || product.oldPrice === "" ? "" : Math.round(Number(product.oldPrice) * VND_PER_PRICE_UNIT)}"></label>
         <label>Stock<input name="stock" type="number" min="0" step="1" value="${Number(product.stock ?? 100)}"></label>
         <label>Sold count<input name="soldCount" type="number" min="0" step="1" value="${Number(product.soldCount || 0)}"></label>
         <label>Rating<input name="rating" type="number" min="0" max="5" step="0.1" value="${Number(product.rating || 0)}"></label>
@@ -106,6 +132,7 @@
       <div class="form-grid">
         <label>Full name<input name="name" value="${escapeHtml(userDisplayName(user))}" required></label>
         <label>Email<input name="email" type="email" value="${escapeHtml(user.email)}" required></label>
+        <label>Phone<input name="phone" type="tel" value="${escapeHtml(user.phone || "")}" placeholder="Customer phone"></label>
         <label>Password<input name="password" type="text" value="${escapeHtml(user.password || "")}" required></label>
         <label>Role<select name="role"><option value="customer" ${user.role !== "admin" ? "selected" : ""}>Customer</option><option value="admin" ${user.role === "admin" ? "selected" : ""}>Admin</option></select></label>
         <label>Lifetime purchases (VND)<input name="totalSpentVnd" type="number" min="0" step="1000" value="${API.getUserSpend(user)}"></label>
@@ -128,8 +155,8 @@
       category: value("category"),
       subCategory: value("subCategory"),
       gender: value("gender"),
-      price: numeric("price"),
-      oldPrice: value("oldPrice") === "" ? null : numeric("oldPrice"),
+      price: toCatalogPriceUnit(numeric("price")),
+      oldPrice: value("oldPrice") === "" ? null : toCatalogPriceUnit(numeric("oldPrice")),
       stock: numeric("stock", 0),
       soldCount: numeric("soldCount", 0),
       rating: numeric("rating", 0),
@@ -166,7 +193,9 @@
       role: String(formData.get("role") || "customer"),
       totalSpentVnd: Number(formData.get("totalSpentVnd") || 0),
       monthlySpendVnd: Number(formData.get("monthlySpendVnd") || 0),
+      phone: String(formData.get("phone") || "").trim(),
       address: String(formData.get("address") || "").trim(),
+      defaultAddress: String(formData.get("address") || "").trim(),
       orders
     });
   }
@@ -180,7 +209,7 @@
       return `<tr>
         <td><div class="table-product"><img src="${escapeHtml(product.imageUrl || "images/women_1.png")}" alt="" onerror="this.src='images/women_1.png'"><div><strong>${escapeHtml(product.name)}</strong><span class="table-muted">${escapeHtml(product.subCategory || product.category || "—")}</span></div></div></td>
         <td>${escapeHtml(product.collection || product.category || "—")}</td>
-        <td>${formatUsd(product.price)}${product.oldPrice ? `<br><span class="table-muted">was ${formatUsd(product.oldPrice)}</span>` : ""}</td>
+        <td>${formatCatalogVnd(product.price)}${product.oldPrice ? `<br><span class="table-muted">Previous: ${formatCatalogVnd(product.oldPrice)}</span>` : ""}</td>
         <td>${Number(product.stock ?? 0)}</td>
         <td>${Number(product.soldCount ?? 0)}</td>
         <td>${labels.length ? labels.map((label, index) => `<span class="label-pill ${index ? "dark" : ""}">${escapeHtml(label)}</span>`).join("") : "—"}</td>
@@ -209,6 +238,68 @@
         <td><div class="action-buttons"><button data-action="edit-user" data-id="${escapeHtml(user.id)}">Edit</button><button class="delete-btn" data-action="delete-user" data-id="${escapeHtml(user.id)}">Delete</button></div></td>
       </tr>`;
     }).join("") : `<tr><td colspan="6" class="empty-row">No accounts match the current search.</td></tr>`;
+  }
+
+  function getAllOrders() {
+    return state.users.flatMap(user => API.asArray(user.orders).map((order, index) => ({
+      ...order,
+      _customer: user,
+      _orderIndex: index,
+      _orderKey: `${user.id}::${order.orderId || index}`
+    }))).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }
+
+  function orderItemSummary(order) {
+    const items = API.asArray(order.items);
+    if (!items.length) return "No item details";
+    return items.map(item => `${item.productName || "Product"} ×${Number(item.quantity || 1)}`).join(" · ");
+  }
+
+  function orderDeliveryText(order) {
+    const address = order.shippingAddress || {};
+    const person = address.name || order.customerName || order._customer?.name || order._customer?.fullName || "Customer";
+    const phone = address.phone || order._customer?.phone || "No phone";
+    const location = [address.address || order._customer?.defaultAddress || order._customer?.address || "No address", address.district, address.city].filter(Boolean).join(", ");
+    return `${person} · ${phone}<br><span class="table-muted">${escapeHtml(location)}</span>`;
+  }
+
+  function renderOrders() {
+    const tbody = $("#orders-table");
+    if (!tbody) return;
+    const query = String($("#order-search")?.value || "").trim().toLowerCase();
+    const statusFilter = String($("#order-status-filter")?.value || "all");
+    const orders = getAllOrders().filter(order => {
+      const haystack = [order.orderId, userDisplayName(order._customer), order._customer?.email, orderItemSummary(order)].join(" ").toLowerCase();
+      return (!query || haystack.includes(query)) && (statusFilter === "all" || String(order.status || "pending") === statusFilter);
+    });
+    const statuses = ["pending", "confirmed", "shipping", "completed", "cancelled"];
+    tbody.innerHTML = orders.length ? orders.map(order => {
+      const totalVnd = Number(order.totalVnd ?? order.total ?? order.grandTotal ?? 0);
+      const currentStatus = String(order.status || "pending");
+      const selectId = `order-status-${escapeHtml(order._orderKey)}`;
+      return `<tr>
+        <td><strong class="user-name">${escapeHtml(order.orderId || "Order")}</strong><span class="table-muted">${escapeHtml(dateText(order.createdAt))}<br>${escapeHtml(userDisplayName(order._customer))}</span></td>
+        <td><span class="table-muted">${escapeHtml(orderItemSummary(order))}</span></td>
+        <td>${orderDeliveryText(order)}</td>
+        <td>${formatVnd(totalVnd)}</td>
+        <td>${escapeHtml(order.paymentMethod || "—")}</td>
+        <td><select class="admin-select compact-select" data-order-status="${escapeHtml(order._orderKey)}">${statuses.map(status => `<option value="${status}" ${status === currentStatus ? "selected" : ""}>${status}</option>`).join("")}</select></td>
+        <td><button data-action="save-order-status" data-user-id="${escapeHtml(order._customer.id)}" data-order-index="${order._orderIndex}" data-order-key="${escapeHtml(order._orderKey)}">Save</button></td>
+      </tr>`;
+    }).join("") : `<tr><td colspan="7" class="empty-row">No customer orders match the current filters.</td></tr>`;
+  }
+
+  async function updateOrderStatus(userId, orderIndex, orderKey) {
+    const user = state.users.find(item => String(item.id) === String(userId));
+    if (!user) throw new Error("Customer account could not be found.");
+    const statusSelect = document.querySelector(`[data-order-status="${CSS.escape(orderKey)}"]`);
+    const status = statusSelect?.value || "pending";
+    const orders = API.asArray(user.orders);
+    if (!orders[Number(orderIndex)]) throw new Error("Order could not be found.");
+    orders[Number(orderIndex)] = { ...orders[Number(orderIndex)], status, updatedAt: new Date().toISOString() };
+    await API.updateUser(user.id, API.userPayload({ ...user, orders }));
+    await reloadData();
+    showToast(`Order status updated to ${status}.`);
   }
 
   function renderMemberships() {
@@ -253,6 +344,7 @@
     renderOverview();
     renderProducts();
     renderUsers();
+    renderOrders();
     renderMemberships();
   }
 
@@ -260,7 +352,7 @@
     state.activeTab = tab;
     $$(".admin-nav-btn").forEach(button => button.classList.toggle("active", button.dataset.adminTab === tab));
     $$(".admin-panel").forEach(panel => panel.classList.toggle("active", panel.dataset.panel === tab));
-    const labels = { overview: "Dashboard overview", products: "Product management", users: "Account management", memberships: "Membership vouchers" };
+    const labels = { overview: "Dashboard overview", products: "Product management", users: "Account management", orders: "Order management", memberships: "Membership vouchers" };
     $("#admin-page-title").textContent = labels[tab] || "COREX dashboard";
   }
 
@@ -346,6 +438,7 @@
     if (action === "edit-product") return openProductEditor(state.products.find(product => String(product.id) === String(id)));
     if (action === "edit-user") return openUserEditor(state.users.find(user => String(user.id) === String(id)));
     if (action === "apply-user-voucher") return applyVoucher(id);
+    if (action === "save-order-status") return updateOrderStatus(button.dataset.userId, button.dataset.orderIndex, button.dataset.orderKey);
     if (action === "delete-product") {
       const product = state.products.find(item => String(item.id) === String(id));
       if (!product || !window.confirm(`Delete “${product.name}” from MockAPI?`)) return;
@@ -383,16 +476,20 @@
       return true;
     } catch (error) {
       console.error(error);
-      sessionStorage.removeItem("corex_admin_session");
+      // Keep the administrator inside the dashboard shell when they came from the signed-in storefront.
+      // CRUD controls expose the connection error instead of bouncing them back to a second login screen.
+      $("#admin-login-screen").hidden = true;
+      $("#admin-dashboard").hidden = false;
       setApiStatus("MockAPI unavailable", "error");
       const message = error?.message || "Unknown MockAPI connection error.";
       $("#admin-login-error").textContent = `Could not connect to MockAPI. ${message}`;
-      showToast("Admin sign-in was not completed because MockAPI could not be reached.", "error");
+      showToast("Dashboard opened, but MockAPI could not be reached.", "error");
       return false;
     }
   }
 
   function bindEvents() {
+    $("#back-to-dashboard-btn")?.addEventListener("click", () => switchTab("overview"));
     $("#admin-login-form").addEventListener("submit", async (event) => {
       event.preventDefault();
       const email = $("#admin-email").value.trim().toLowerCase();
@@ -407,7 +504,11 @@
       submitButton.disabled = true;
       submitButton.textContent = "Connecting to MockAPI…";
       const entered = await enterDashboard();
-      if (entered) sessionStorage.setItem("corex_admin_session", "true");
+      if (entered) {
+        sessionStorage.setItem("corex_admin_session", "true");
+        localStorage.setItem("corex_admin_session", "true");
+        localStorage.setItem("corex_user", JSON.stringify({ name: "COREX Administrator", email, role: "admin" }));
+      }
       submitButton.disabled = false;
       submitButton.textContent = "Sign in to dashboard";
     });
@@ -424,11 +525,15 @@
     $("#user-search").addEventListener("input", renderUsers);
     $("#products-table").addEventListener("click", event => handleTableAction(event).catch(error => showToast(error.message, "error")));
     $("#users-table").addEventListener("click", event => handleTableAction(event).catch(error => showToast(error.message, "error")));
+    $("#orders-table").addEventListener("click", event => handleTableAction(event).catch(error => showToast(error.message, "error")));
     $("#memberships-table").addEventListener("click", event => handleTableAction(event).catch(error => showToast(error.message, "error")));
+    $("#order-search").addEventListener("input", renderOrders);
+    $("#order-status-filter").addEventListener("change", renderOrders);
     $("#close-modal-btn").addEventListener("click", closeModal);
     $("#admin-modal").addEventListener("click", event => { if (event.target.id === "admin-modal") closeModal(); });
     $("#admin-logout-btn").addEventListener("click", () => {
       sessionStorage.removeItem("corex_admin_session");
+      localStorage.removeItem("corex_admin_session");
       if (window.parent && window.parent !== window) {
         window.parent.postMessage({ source: "corex-admin", type: "logout" }, window.location.origin);
         return;
@@ -443,7 +548,9 @@
       return;
     }
     bindEvents();
-    if (sessionStorage.getItem("corex_admin_session") === "true") {
+    // Direct navigation from the main storefront bypasses the separate login screen only
+    // when the same browser has explicitly signed in as the fixed administrator.
+    if (hasExplicitAdminSession()) {
       enterDashboard();
     }
   });

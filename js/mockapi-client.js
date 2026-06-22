@@ -215,6 +215,12 @@
         name: user.name || user.fullName || "Unnamed customer",
         email: String(user.email || "").trim().toLowerCase(),
         role: user.role === "admin" ? "admin" : "customer",
+        fullName: user.fullName || user.name || "Unnamed customer",
+        phone: String(user.phone || "").trim(),
+        address: String(user.address || user.defaultAddress || "").trim(),
+        defaultAddress: String(user.defaultAddress || user.address || "").trim(),
+        city: String(user.city || "").trim(),
+        district: String(user.district || "").trim(),
         orders: asArray(user.orders),
         totalSpentVnd: membership.totalSpentVnd,
         monthlySpendVnd: membership.monthlySpendVnd,
@@ -257,18 +263,46 @@
       return { seeded: created.length, products: created };
     },
 
-    async recordCustomerOrder(user, order) {
+    async updateInventoryForOrder(items = []) {
+      if (!Array.isArray(items) || items.length === 0) return [];
+      const products = await api.listProducts();
+      const updates = [];
+      for (const item of items) {
+        const remoteProduct = (products || []).find(product => String(product.legacyId ?? product.id) === String(item.productId));
+        if (!remoteProduct) continue;
+        const quantity = Math.max(0, asNumber(item.quantity, 0));
+        const updatedProduct = api.productPayload({
+          ...remoteProduct,
+          stock: Math.max(0, asNumber(remoteProduct.stock, 0) - quantity),
+          soldCount: asNumber(remoteProduct.soldCount, 0) + quantity
+        });
+        updates.push(api.updateProduct(remoteProduct.id, updatedProduct));
+      }
+      return Promise.allSettled(updates);
+    },
+
+    async recordCustomerOrder(user, order, profile = {}) {
       if (!user?.id) return null;
       const remoteUser = await api.getUser(user.id);
       const orders = asArray(remoteUser.orders);
       orders.push(order);
       const updated = api.userPayload({
         ...remoteUser,
+        ...profile,
+        name: profile.name || remoteUser.name || remoteUser.fullName,
+        fullName: profile.name || remoteUser.fullName || remoteUser.name,
+        phone: profile.phone || remoteUser.phone,
+        address: profile.address || remoteUser.address || remoteUser.defaultAddress,
+        defaultAddress: profile.defaultAddress || remoteUser.defaultAddress || remoteUser.address,
+        city: profile.city || remoteUser.city,
+        district: profile.district || remoteUser.district,
         orders,
         totalSpentVnd: api.getUserSpend(remoteUser) + asNumber(order.totalVnd ?? order.total),
         monthlySpendVnd: api.getCurrentMonthSpend(remoteUser) + asNumber(order.totalVnd ?? order.total)
       });
-      return api.updateUser(remoteUser.id, updated);
+      const savedUser = await api.updateUser(remoteUser.id, updated);
+      api.updateInventoryForOrder(order.items).catch(error => console.warn("COREX: inventory update failed after order sync.", error));
+      return savedUser;
     }
   };
 

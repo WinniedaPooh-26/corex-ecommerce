@@ -1524,20 +1524,33 @@ const state = {
   currentView: "home"
 };
 
-function formatPrice(usdPrice) {
-  if (!usdPrice && usdPrice !== 0) return "";
-  const vndPrice = usdPrice * 25000;
-  return vndPrice.toLocaleString("vi-VN") + " đ";
+// Catalog values remain stored as legacy price units for MockAPI compatibility.
+// Every customer-facing value is converted and rendered exclusively in Vietnamese đồng.
+const VND_PER_PRICE_UNIT = 25000;
+const FREE_SHIPPING_THRESHOLD = 75;
+const EXPRESS_SHIPPING_FEE = 5;
+
+function formatVnd(vndAmount) {
+  const normalized = Math.round(Number(vndAmount || 0));
+  return `${normalized.toLocaleString("vi-VN")} ₫`;
+}
+
+function toVnd(priceUnit) {
+  return Number(priceUnit || 0) * VND_PER_PRICE_UNIT;
+}
+
+function formatPrice(priceUnit) {
+  if (!priceUnit && priceUnit !== 0) return "";
+  return formatVnd(toVnd(priceUnit));
 }
 
 // ==========================================
 // 3. STORAGE ENGINE
 // ==========================================
-function saveToStorage() {
-  localStorage.setItem("corex_cart", JSON.stringify(state.cart));
-  localStorage.setItem("corex_wishlist", JSON.stringify(state.wishlist));
-  localStorage.setItem("corex_user", JSON.stringify(state.currentUser));
-}
+const COREX_USER_KEY = "corex_user";
+const COREX_ADMIN_SESSION_KEY = "corex_admin_session";
+const COREX_LEGACY_CART_KEY = "corex_cart";
+const COREX_LEGACY_WISHLIST_KEY = "corex_wishlist";
 
 function readStoredJson(key, fallback) {
   try {
@@ -1550,34 +1563,124 @@ function readStoredJson(key, fallback) {
   }
 }
 
+function isAdminUser(user = state.currentUser) {
+  return Boolean(user)
+    && String(user.role || "").toLowerCase() === "admin"
+    && String(user.email || "").trim().toLowerCase() === String(window.COREX_VENV?.ADMIN_EMAIL || "admin@corex.com").toLowerCase();
+}
+
+function getUserStorageId(user = state.currentUser) {
+  if (!user) return null;
+  const rawId = user.id ?? user.email ?? user.name ?? "customer";
+  return String(rawId).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_");
+}
+
+function getScopedStorageKey(base, user = state.currentUser) {
+  const userId = getUserStorageId(user);
+  return userId ? `${base}_${userId}` : null;
+}
+
+function sanitizeUserForStorage(user) {
+  if (!user) return null;
+  const safeUser = { ...user };
+  delete safeUser.password;
+  return safeUser;
+}
+
+function saveToStorage() {
+  if (!state.currentUser) {
+    localStorage.removeItem(COREX_USER_KEY);
+    localStorage.removeItem(COREX_ADMIN_SESSION_KEY);
+    return;
+  }
+
+  const cartKey = getScopedStorageKey("corex_cart");
+  const wishlistKey = getScopedStorageKey("corex_wishlist");
+  if (cartKey) localStorage.setItem(cartKey, JSON.stringify(state.cart));
+  if (wishlistKey) localStorage.setItem(wishlistKey, JSON.stringify(state.wishlist));
+  localStorage.setItem(COREX_USER_KEY, JSON.stringify(sanitizeUserForStorage(state.currentUser)));
+
+  if (isAdminUser()) localStorage.setItem(COREX_ADMIN_SESSION_KEY, "true");
+  else localStorage.removeItem(COREX_ADMIN_SESSION_KEY);
+}
+
+function restoreAccountCommerceState(user = state.currentUser) {
+  const cartKey = getScopedStorageKey("corex_cart", user);
+  const wishlistKey = getScopedStorageKey("corex_wishlist", user);
+
+  // One-time compatibility migration for an older customer cart. Guests never receive a cart.
+  const legacyCart = readStoredJson(COREX_LEGACY_CART_KEY, []);
+  const legacyWishlist = readStoredJson(COREX_LEGACY_WISHLIST_KEY, []);
+  const storedCart = cartKey ? readStoredJson(cartKey, null) : null;
+  const storedWishlist = wishlistKey ? readStoredJson(wishlistKey, null) : null;
+
+  state.cart = Array.isArray(storedCart) ? storedCart : (Array.isArray(legacyCart) && !isLegacyDemoCart(legacyCart) ? legacyCart : []);
+  state.wishlist = Array.isArray(storedWishlist) ? storedWishlist : (Array.isArray(legacyWishlist) ? legacyWishlist : []);
+
+  // Never retain shared data after it has been migrated to a signed-in account.
+  localStorage.removeItem(COREX_LEGACY_CART_KEY);
+  localStorage.removeItem(COREX_LEGACY_WISHLIST_KEY);
+}
+
 function isLegacyDemoCart(cart) {
   if (!Array.isArray(cart) || cart.length !== 2) return false;
-
-  const productIds = cart
-    .map(item => Number(item?.product?.id))
-    .sort((a, b) => a - b);
-
-  return productIds.length === 2
-    && productIds[0] === 1
-    && productIds[1] === 2
-    && cart.every(item => Number(item?.quantity) === 1);
+  const productIds = cart.map(item => Number(item?.product?.id)).sort((a, b) => a - b);
+  return productIds.length === 2 && productIds[0] === 1 && productIds[1] === 2 && cart.every(item => Number(item?.quantity) === 1);
 }
 
 function loadFromStorage() {
-  const cartData = readStoredJson("corex_cart", []);
-  const wishlistData = readStoredJson("corex_wishlist", []);
-  const userData = readStoredJson("corex_user", null);
+  let userData = readStoredJson(COREX_USER_KEY, null);
 
-  state.cart = Array.isArray(cartData) ? cartData : [];
-  state.wishlist = Array.isArray(wishlistData) ? wishlistData : [];
-  state.currentUser = userData || null;
-
-  // Remove the two seeded presentation products created by older versions.
-  // Carts stay empty by default, while carts created by a real user are preserved.
-  if (isLegacyDemoCart(state.cart)) {
-    state.cart = [];
-    saveToStorage();
+  // Older project versions could pre-populate an admin account without a deliberate login.
+  // Only an explicitly created admin session is accepted now.
+  if (userData && String(userData.role || "").toLowerCase() === "admin" && localStorage.getItem(COREX_ADMIN_SESSION_KEY) !== "true") {
+    userData = null;
+    localStorage.removeItem(COREX_USER_KEY);
   }
+
+  state.currentUser = userData || null;
+  if (state.currentUser) {
+    restoreAccountCommerceState(state.currentUser);
+  } else {
+    state.cart = [];
+    state.wishlist = [];
+  }
+}
+
+function establishSignedInUser(user) {
+  state.currentUser = user ? { ...user, name: user.name || user.fullName || "COREX Customer" } : null;
+  restoreAccountCommerceState(state.currentUser);
+  saveToStorage();
+  updateHeaderAccountControls();
+}
+
+function signOutCurrentUser() {
+  // Current account data has already been saved under its own scoped storage key.
+  state.currentUser = null;
+  state.cart = [];
+  state.wishlist = [];
+  state.activeCoupon = null;
+  saveToStorage();
+  updateBadges();
+  updateHeaderAccountControls();
+}
+
+function updateHeaderAccountControls() {
+  const isAdmin = isAdminUser();
+  const dashboardButton = document.getElementById("admin-dashboard-nav-btn");
+  const mobileDashboardLink = document.getElementById("mobile-admin-dashboard-link");
+  if (dashboardButton) dashboardButton.hidden = !isAdmin;
+  if (mobileDashboardLink) mobileDashboardLink.hidden = !isAdmin;
+}
+
+function requireAuthenticatedUser(action = "continue") {
+  if (state.currentUser) return true;
+  const message = `Please sign in or register before you ${action}.`;
+  showToast(message, "error");
+  if (typeof window.openCorexAuthModal === "function") {
+    window.openCorexAuthModal("login", message);
+  }
+  return false;
 }
 
 // ==========================================
@@ -1668,41 +1771,46 @@ function navigateTo(view, params = {}, options = {}) {
   const settings = {
     updateUrl: true,
     replace: false,
+    allowGuest: false,
     ...options
   };
 
   const safeView = ROUTABLE_VIEWS.has(view) ? view : "home";
+  const restrictedCustomerViews = new Set(["cart", "checkout", "wishlist"]);
+
+  if (!settings.allowGuest && restrictedCustomerViews.has(safeView) && !requireAuthenticatedUser(`open ${safeView === "wishlist" ? "your wishlist" : safeView}`)) {
+    return;
+  }
+
+  if (safeView === "admin" && !isAdminUser()) {
+    showToast("Administrator access is required to open the dashboard.", "error");
+    if (!state.currentUser && typeof window.openCorexAuthModal === "function") window.openCorexAuthModal("login");
+    return;
+  }
+
+  if (safeView === "checkout" && state.cart.length === 0) {
+    showToast("Your cart is empty. Add a product before checkout.", "error");
+    navigateTo("cart", {}, { updateUrl: settings.updateUrl, replace: true });
+    return;
+  }
+
   state.currentView = safeView;
   document.body.classList.toggle("corex-admin-route", safeView === "admin");
   window.scrollTo({ top: 0, behavior: "auto" });
 
-  document.querySelectorAll(".view-section").forEach(section => {
-    section.classList.remove("active-view");
-  });
-
+  document.querySelectorAll(".view-section").forEach(section => section.classList.remove("active-view"));
   const targetSection = document.getElementById(`${safeView}-view`);
-  if (targetSection) {
-    targetSection.classList.add("active-view");
-  }
+  if (targetSection) targetSection.classList.add("active-view");
 
-  document.querySelectorAll(".nav-link").forEach(link => {
-    link.classList.remove("active");
-  });
+  document.querySelectorAll(".nav-link").forEach(link => link.classList.remove("active"));
 
   if (safeView === "home") {
     document.querySelector('.nav-link[onclick*="navigateTo(\'home\'"]')?.classList.add("active");
   } else if (safeView === "shop") {
     const category = params.category || "all";
     state.activeCategory = category;
-
-    if (!params.keepFilters) {
-      resetFilters();
-    }
-
-    document.querySelectorAll(`.nav-link[data-category="${category}"]`).forEach(link => {
-      link.classList.add("active");
-    });
-
+    if (!params.keepFilters) resetFilters();
+    document.querySelectorAll(`.nav-link[data-category="${category}"]`).forEach(link => link.classList.add("active"));
     renderShopView();
   } else if (safeView === "detail") {
     if (params.id) {
@@ -1722,20 +1830,17 @@ function navigateTo(view, params = {}, options = {}) {
   } else if (safeView === "wishlist") {
     renderWishlistView();
   } else if (safeView === "admin") {
-    // Keep the admin control center under the same public COREX URL: #admin.
-    // The iframe shares the same origin/session and retains the existing admin CRUD code.
     const adminFrame = document.getElementById("admin-dashboard-frame");
-    if (adminFrame && (!adminFrame.getAttribute("src") || adminFrame.getAttribute("src") === "about:blank")) {
-      adminFrame.setAttribute("src", "admin.html?embedded=1");
+    if (adminFrame) {
+      const requiredSource = "admin.html?embedded=1&autologin=1";
+      if (adminFrame.getAttribute("src") !== requiredSource) adminFrame.setAttribute("src", requiredSource);
     }
   }
 
   updateBadges();
+  updateHeaderAccountControls();
   closeMobileMenu();
-
-  if (settings.updateUrl) {
-    syncBrowserRoute(safeView, params, settings.replace);
-  }
+  if (settings.updateUrl) syncBrowserRoute(safeView, params, settings.replace);
 }
 
 function restoreRouteFromLocation() {
@@ -1759,6 +1864,7 @@ function updateBadges() {
     b.textContent = wishlistCount;
     b.style.display = wishlistCount > 0 ? "flex" : "none";
   });
+  updateHeaderAccountControls();
 }
 
 // ==========================================
@@ -2108,8 +2214,8 @@ function createProductCard(product) {
 
   card.querySelector(".wishlist-btn").addEventListener("click", (e) => {
     e.stopPropagation();
-    toggleWishlist(product.id);
-    e.currentTarget.classList.toggle("active");
+    const isWishedNow = toggleWishlist(product.id);
+    if (isWishedNow !== null) e.currentTarget.classList.toggle("active", isWishedNow);
   });
 
   card.querySelector(".quick-add-btn").addEventListener("click", (e) => {
@@ -2124,49 +2230,44 @@ function createProductCard(product) {
 // 10. QUICK ADD TO CART
 // ==========================================
 function quickAddToCart(product) {
-  const selectedColor = product.colors[0];
+  const selectedColor = product.colors[0] || { name: "Default", value: "#FAF5F0" };
   const selectedSize = product.sizes[0] || "One Size";
-  addToCart(product, selectedSize, selectedColor, 1);
+  return addToCart(product, selectedSize, selectedColor, 1);
 }
 
 function addToCart(product, size, color, quantity = 1) {
+  if (!requireAuthenticatedUser("add products to your cart")) return false;
+  const selectedColor = color || { name: "Default", value: "#FAF5F0" };
   const existingIndex = state.cart.findIndex(item => 
-    item.product.id === product.id && 
-    item.size === size && 
-    item.color.name === color.name
+    item.product.id === product.id && item.size === size && item.color.name === selectedColor.name
   );
 
-  if (existingIndex > -1) {
-    state.cart[existingIndex].quantity += quantity;
-  } else {
-    state.cart.push({
-      product,
-      size,
-      color,
-      quantity
-    });
-  }
+  if (existingIndex > -1) state.cart[existingIndex].quantity += quantity;
+  else state.cart.push({ product, size, color: selectedColor, quantity });
 
   saveToStorage();
   updateBadges();
-  showToast(`Added ${quantity}x ${product.name} (${size} / ${color.name}) to cart!`);
+  showToast(`Added ${quantity}x ${product.name} (${size} / ${selectedColor.name}) to cart!`);
+  return true;
 }
 
 function toggleWishlist(productId) {
+  if (!requireAuthenticatedUser("save products to your wishlist")) return null;
   const idx = state.wishlist.indexOf(productId);
+  let isWished;
   if (idx > -1) {
     state.wishlist.splice(idx, 1);
+    isWished = false;
     showToast("Removed from wishlist.");
   } else {
     state.wishlist.push(productId);
+    isWished = true;
     showToast("Added to wishlist!", "success");
   }
   saveToStorage();
   updateBadges();
-
-  if (state.currentView === "wishlist") {
-    renderWishlistView();
-  }
+  if (state.currentView === "wishlist") renderWishlistView();
+  return isWished;
 }
 
 // ==========================================
@@ -2209,10 +2310,10 @@ function renderShopView() {
   }
 
   if (state.activeFilters.priceMin !== "") {
-    filtered = filtered.filter(p => p.price >= parseFloat(state.activeFilters.priceMin));
+    filtered = filtered.filter(p => toVnd(p.price) >= Number(state.activeFilters.priceMin));
   }
   if (state.activeFilters.priceMax !== "") {
-    filtered = filtered.filter(p => p.price <= parseFloat(state.activeFilters.priceMax));
+    filtered = filtered.filter(p => toVnd(p.price) <= Number(state.activeFilters.priceMax));
   }
 
   if (state.activeFilters.material.length > 0) {
@@ -2223,6 +2324,10 @@ function renderShopView() {
     filtered.sort((a, b) => a.price - b.price);
   } else if (state.activeSort === "price-high") {
     filtered.sort((a, b) => b.price - a.price);
+  } else if (state.activeSort === "most-purchased") {
+    filtered.sort((a, b) => Number(b.soldCount || 0) - Number(a.soldCount || 0));
+  } else if (state.activeSort === "least-purchased") {
+    filtered.sort((a, b) => Number(a.soldCount || 0) - Number(b.soldCount || 0));
   } else if (state.activeSort === "rating") {
     filtered.sort((a, b) => b.rating - a.rating);
   } else if (state.activeSort === "newest") {
@@ -2315,9 +2420,9 @@ function renderActiveFilterPills() {
 
   if (state.activeFilters.priceMin !== "" || state.activeFilters.priceMax !== "") {
     hasFilters = true;
-    const min = state.activeFilters.priceMin || "0";
-    const max = state.activeFilters.priceMax || "Any";
-    createPill(row, "price", "range", `${formatPrice(parseFloat(min))} - ${formatPrice(parseFloat(max))}`, () => {
+    const min = state.activeFilters.priceMin === "" ? "0" : formatVnd(state.activeFilters.priceMin);
+    const max = state.activeFilters.priceMax === "" ? "Any" : formatVnd(state.activeFilters.priceMax);
+    createPill(row, "price", "range", `${min} - ${max}`, () => {
       state.activeFilters.priceMin = "";
       state.activeFilters.priceMax = "";
       const minVal = document.getElementById("price-min");
@@ -2560,13 +2665,10 @@ function renderProductDetailView() {
   const buyBtn = document.getElementById("detail-buy-now-btn");
   if (buyBtn) {
     buyBtn.onclick = () => {
-      state.cart = [{
-        product: prod,
-        size: selectedSize,
-        color: selectedColor,
-        quantity: activeQuantity
-      }];
+      if (!requireAuthenticatedUser("buy products")) return;
+      state.cart = [{ product: prod, size: selectedSize, color: selectedColor, quantity: activeQuantity }];
       saveToStorage();
+      updateBadges();
       navigateTo("checkout");
     };
   }
@@ -2580,8 +2682,8 @@ function renderProductDetailView() {
     `;
 
     wishBtn.onclick = () => {
-      toggleWishlist(prod.id);
-      const isWishedNow = state.wishlist.includes(prod.id);
+      const isWishedNow = toggleWishlist(prod.id);
+      if (isWishedNow === null) return;
       wishBtn.querySelector("svg").style.fill = isWishedNow ? 'var(--accent-primary)' : 'none';
       wishBtn.querySelector("svg").style.stroke = isWishedNow ? 'var(--accent-primary)' : 'currentColor';
     };
@@ -2774,11 +2876,11 @@ function renderCartSummary() {
     hasFreeShip = true;
   }
 
-  // Free shipping threshold is $75 (aligned with demo.png)
-  const shipThreshold = 75;
+  // Free shipping threshold: 1.875.000 ₫ (75 legacy price units).
+  const shipThreshold = FREE_SHIPPING_THRESHOLD;
   const subtotalAfterDiscount = subtotal - discount;
   const isFreeShipEligible = hasFreeShip || subtotalAfterDiscount >= shipThreshold;
-  const shipping = isFreeShipEligible ? 0 : 5;
+  const shipping = isFreeShipEligible ? 0 : EXPRESS_SHIPPING_FEE;
   const total = subtotalAfterDiscount + shipping;
 
   // Render dynamic free shipping progress bar text
@@ -2796,7 +2898,7 @@ function renderCartSummary() {
   } else {
     progressTextHTML = `
       <div class="free-ship-progress-box" style="margin-bottom: 1.5rem; background-color: #e8f5e9; padding: 12px; border-radius: var(--radius-sm); text-align: center; border: 1px solid #c8e6c9;">
-        <p style="font-size: 0.82rem; font-weight: 600; color: #2e7d32;">🎉 Congratulations! You qualify for Free Shipping!</p>
+        <p style="font-size: 0.82rem; font-weight: 600; color: #2e7d32;">🎉 Congratulations! You qualify for free standard shipping!</p>
       </div>
     `;
   }
@@ -2816,7 +2918,7 @@ function renderCartSummary() {
       <span>-${formatPrice(discount)}</span>
     </div>` : ""}
     <div class="summary-row">
-      <span>Shipping ${subtotalAfterDiscount >= shipThreshold ? " (Free over $75)" : ""}</span>
+      <span>Shipping ${subtotalAfterDiscount >= shipThreshold ? ` (Free over ${formatPrice(shipThreshold)})` : ""}</span>
       <span>${shipping === 0 ? "FREE" : formatPrice(shipping)}</span>
     </div>
     <div class="coupon-section">
@@ -2853,7 +2955,7 @@ function applyCouponCode(code) {
   } else if (code === "FREESHIP") {
     state.activeCoupon = "FREESHIP";
     msg.className = "coupon-message success";
-    msg.textContent = "Coupon FREESHIP applied: Free standard shipping!";
+    msg.textContent = "Coupon FREESHIP applied: Free standard shipping has been applied!";
     renderCartView();
   } else if (code === "") {
     state.activeCoupon = null;
@@ -2874,12 +2976,58 @@ function applyCouponCode(code) {
 let activeShippingMethod = "standard";
 let activePaymentMethod = "cod";
 
-function renderCheckoutView() {
-  const container = document.getElementById("checkout-view");
-  if (!container) return;
+function getCurrentCheckoutProfile() {
+  return {
+    name: document.getElementById("checkout-name")?.value.trim() || "",
+    phone: document.getElementById("checkout-phone")?.value.trim() || "",
+    email: document.getElementById("checkout-email")?.value.trim().toLowerCase() || "",
+    address: document.getElementById("checkout-address")?.value.trim() || "",
+    city: document.getElementById("checkout-city")?.value.trim() || "",
+    district: document.getElementById("checkout-district")?.value.trim() || ""
+  };
+}
 
+function fillCheckoutFromAccount(force = false) {
+  if (!state.currentUser) return;
+  const user = state.currentUser;
+  const profile = {
+    name: user.name || user.fullName || "",
+    phone: user.phone || "",
+    email: user.email || "",
+    address: user.defaultAddress || user.address || "",
+    city: user.city || "",
+    district: user.district || ""
+  };
+  const fields = {
+    "checkout-name": profile.name,
+    "checkout-phone": profile.phone,
+    "checkout-email": profile.email,
+    "checkout-address": profile.address,
+    "checkout-city": profile.city,
+    "checkout-district": profile.district
+  };
+  Object.entries(fields).forEach(([id, value]) => {
+    const element = document.getElementById(id);
+    if (element && (force || !element.value.trim())) element.value = value;
+  });
+  const note = document.getElementById("checkout-account-address-note");
+  if (note) {
+    note.textContent = profile.address
+      ? `${profile.name || "Account"} · ${profile.phone || "No phone"} · ${profile.address}`
+      : "Your account has no saved address yet. Complete the details below.";
+  }
+}
+
+function renderCheckoutView() {
+  if (!requireAuthenticatedUser("continue to checkout")) return;
+  if (state.cart.length === 0) {
+    navigateTo("cart", {}, { replace: true });
+    return;
+  }
+
+  const container = document.getElementById("checkout-view");
   const list = document.getElementById("checkout-summary-items");
-  if (!list) return;
+  if (!container || !list) return;
 
   list.innerHTML = "";
   state.cart.forEach(item => {
@@ -2887,57 +3035,43 @@ function renderCheckoutView() {
     el.className = "checkout-item-preview";
     el.innerHTML = `
       <div class="checkout-item-img" style="position:relative; width:50px; height:50px; overflow:hidden; border-radius:var(--radius-sm);">
-        <img src="${item.product.imageUrl}" alt="${item.product.name}" 
-          style="width:100%; height:100%; object-fit:cover; display:block;"
-          onload="this.style.display='block'; this.nextElementSibling.style.display='none';" 
-          onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-        <div style="width: 50px; height: 50px; display:none; background-color:var(--card-bg); flex-direction:column; justify-content:center; align-items:center; font-size:0.5rem; font-weight:800; color:var(--text-secondary);">
-          CRX
-        </div>
-
+        <img src="${item.product.imageUrl}" alt="${item.product.name}" style="width:100%; height:100%; object-fit:cover; display:block;" onload="this.style.display='block'; this.nextElementSibling.style.display='none';" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+        <div style="width:50px;height:50px;display:none;background-color:var(--card-bg);flex-direction:column;justify-content:center;align-items:center;font-size:.5rem;font-weight:800;color:var(--text-secondary);">CRX</div>
       </div>
-      <div class="checkout-item-info">
-        <h4 class="checkout-item-name">${item.product.name}</h4>
-        <span class="checkout-item-variant">Size: ${item.size} | Color: ${item.color.name}</span>
-        <div class="checkout-item-qty-price">Qty: ${item.quantity} × ${formatPrice(item.product.price)}</div>
-      </div>
-      <div class="checkout-item-price">${formatPrice(item.product.price * item.quantity)}</div>
-    `;
+      <div class="checkout-item-info"><h4 class="checkout-item-name">${item.product.name}</h4><span class="checkout-item-variant">Size: ${item.size} | Color: ${item.color.name}</span><div class="checkout-item-qty-price">Qty: ${item.quantity} × ${formatPrice(item.product.price)}</div></div>
+      <div class="checkout-item-price">${formatPrice(item.product.price * item.quantity)}</div>`;
     list.appendChild(el);
   });
 
-  recalcCheckoutTotals();
-
-  document.querySelectorAll('.method-card[data-ship]').forEach(card => {
-    card.onclick = (e) => {
-      document.querySelectorAll('.method-card[data-ship]').forEach(c => c.classList.remove("active"));
-      document.querySelectorAll('.method-card[data-ship] input').forEach(inp => inp.checked = false);
-      
-      card.classList.add("active");
-      card.querySelector("input").checked = true;
-      activeShippingMethod = card.dataset.ship;
-      recalcCheckoutTotals();
-    };
+  fillCheckoutFromAccount(false);
+  document.getElementById("checkout-fill-account-btn")?.addEventListener("click", () => {
+    fillCheckoutFromAccount(true);
+    showToast("Saved account details applied to checkout.");
   });
 
+  recalcCheckoutTotals();
+  document.querySelectorAll('.method-card[data-ship]').forEach(card => {
+    card.onclick = () => {
+      document.querySelectorAll('.method-card[data-ship]').forEach(c => c.classList.remove("active"));
+      document.querySelectorAll('.method-card[data-ship] input').forEach(inp => inp.checked = false);
+      card.classList.add("active"); card.querySelector("input").checked = true;
+      activeShippingMethod = card.dataset.ship; recalcCheckoutTotals();
+    };
+  });
   document.querySelectorAll('.method-card[data-payment]').forEach(card => {
-    card.onclick = (e) => {
+    card.onclick = () => {
       document.querySelectorAll('.method-card[data-payment]').forEach(c => c.classList.remove("active"));
       document.querySelectorAll('.method-card[data-payment] input').forEach(inp => inp.checked = false);
-      
-      card.classList.add("active");
-      card.querySelector("input").checked = true;
+      card.classList.add("active"); card.querySelector("input").checked = true;
       activePaymentMethod = card.dataset.payment;
     };
   });
 
   const submitBtn = document.getElementById("place-order-btn");
   if (submitBtn) {
-    submitBtn.onclick = (e) => {
-      e.preventDefault();
-      if (validateCheckoutForm()) {
-        processOrderSuccess();
-      }
+    submitBtn.onclick = async (event) => {
+      event.preventDefault();
+      if (validateCheckoutForm()) await processOrderSuccess();
     };
   }
 }
@@ -2953,13 +3087,13 @@ function recalcCheckoutTotals() {
     hasFreeShip = true;
   }
 
-  // Shipping details ($75 free shipping threshold, $5 express)
+  // Shipping is displayed in VNĐ: free over 1.875.000 ₫; express is 125.000 ₫.
   let shipFee = 0;
   if (!hasFreeShip) {
     if (activeShippingMethod === "standard") {
-      shipFee = subtotal - discount >= 75 ? 0 : 5;
+      shipFee = subtotal - discount >= FREE_SHIPPING_THRESHOLD ? 0 : EXPRESS_SHIPPING_FEE;
     } else {
-      shipFee = 5.00; // Express shipping matches $5.00 from mockup
+      shipFee = EXPRESS_SHIPPING_FEE; // 125.000 ₫ after VNĐ conversion
     }
   }
 
@@ -2981,7 +3115,7 @@ function recalcCheckoutTotals() {
 
 function validateCheckoutForm() {
   let isValid = true;
-  const fields = ["checkout-name", "checkout-phone", "checkout-email", "checkout-address", "checkout-city", "checkout-district"];
+  const fields = ["checkout-name", "checkout-phone", "checkout-email", "checkout-address"];
   
   fields.forEach(fid => {
     const el = document.getElementById(fid);
@@ -3034,66 +3168,70 @@ function validatePhone(phone) {
 // ==========================================
 // 15. PROCESS ORDER SUCCESS
 // ==========================================
-function processOrderSuccess() {
+async function processOrderSuccess() {
+  if (!requireAuthenticatedUser("place an order") || state.cart.length === 0) return;
+  const submitBtn = document.getElementById("place-order-btn");
+  if (submitBtn?.disabled) return;
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = "Placing order…"; }
+
   const orderId = "CRX-" + Math.floor(100000 + Math.random() * 900000);
-  const date = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
-  
+  const date = new Date().toLocaleDateString("vi-VN", { year: "numeric", month: "long", day: "numeric" });
   const subtotal = state.cart.reduce((total, item) => total + (item.product.price * item.quantity), 0);
-  let discount = 0;
-  let hasFreeShip = false;
-  if (state.activeCoupon === "COREX10") {
-    discount = subtotal * 0.1;
-  } else if (state.activeCoupon === "FREESHIP") {
-    hasFreeShip = true;
-  }
-  
-  let shipFee = 0;
-  if (!hasFreeShip) {
-    shipFee = activeShippingMethod === "standard" ? (subtotal - discount >= 75 ? 0 : 5) : 5;
-  }
+  let discount = state.activeCoupon === "COREX10" ? subtotal * 0.1 : 0;
+  const hasFreeShip = state.activeCoupon === "FREESHIP";
+  const shipFee = hasFreeShip ? 0 : (activeShippingMethod === "standard" ? (subtotal - discount >= FREE_SHIPPING_THRESHOLD ? 0 : EXPRESS_SHIPPING_FEE) : EXPRESS_SHIPPING_FEE);
   const total = subtotal - discount + shipFee;
+  const shippingProfile = getCurrentCheckoutProfile();
 
   document.getElementById("success-order-id").textContent = orderId;
   document.getElementById("success-order-date").textContent = date;
   document.getElementById("success-order-payment").textContent = getPaymentMethodLabel(activePaymentMethod);
   document.getElementById("success-order-total").textContent = formatPrice(total);
 
-  // Store the order against the signed-in customer in MockAPI when available.
-  // The dashboard later uses this data to calculate total spending and membership vouchers.
-  if (state.currentUser?.id && window.CorexMockApi) {
-    const orderRecord = {
-      orderId,
-      createdAt: new Date().toISOString(),
-      totalVnd: Math.round(total * 25000),
-      totalUsd: total,
-      items: state.cart.map(item => ({
-        productId: item.product.id,
-        productName: item.product.name,
-        quantity: item.quantity,
-        size: item.size,
-        color: item.color?.name || ""
-      })),
-      paymentMethod: activePaymentMethod,
-      status: "pending"
-    };
+  const orderRecord = {
+    orderId,
+    createdAt: new Date().toISOString(),
+    totalVnd: Math.round(toVnd(total)),
+    subtotalVnd: Math.round(toVnd(subtotal)),
+    discountVnd: Math.round(toVnd(discount)),
+    shippingVnd: Math.round(toVnd(shipFee)),
+    shippingAddress: { ...shippingProfile },
+    items: state.cart.map(item => ({
+      productId: item.product.id,
+      productName: item.product.name,
+      priceVnd: Math.round(toVnd(item.product.price)),
+      quantity: item.quantity,
+      size: item.size,
+      color: item.color?.name || ""
+    })),
+    paymentMethod: activePaymentMethod,
+    status: "pending"
+  };
 
-    window.CorexMockApi.recordCustomerOrder(state.currentUser, orderRecord)
-      .then(updatedUser => {
-        if (updatedUser) {
-          state.currentUser = { ...state.currentUser, ...updatedUser };
-          saveToStorage();
-        }
-      })
-      .catch(error => console.warn("COREX: order was completed locally but could not be synced to MockAPI.", error));
+  try {
+    if (state.currentUser?.id && window.CorexMockApi) {
+      const saveAddress = Boolean(document.getElementById("checkout-save-address")?.checked);
+      const updatedUser = await window.CorexMockApi.recordCustomerOrder(
+        state.currentUser,
+        orderRecord,
+        saveAddress ? { ...shippingProfile, defaultAddress: shippingProfile.address } : {}
+      );
+      if (updatedUser) {
+        state.currentUser = { ...state.currentUser, ...updatedUser, name: updatedUser.name || shippingProfile.name };
+      }
+    }
+  } catch (error) {
+    console.warn("COREX: order completed locally but MockAPI sync failed.", error);
+    showToast("Order placed, but MockAPI synchronization will need a retry.", "error");
   }
 
   state.cart = [];
   state.activeCoupon = null;
   saveToStorage();
   updateBadges();
-
   navigateTo("success");
   showToast("Order placed successfully!", "success");
+  if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Place Order"; }
 }
 
 function getPaymentMethodLabel(method) {
@@ -3207,171 +3345,140 @@ function bindAuthModal() {
   const overlay = document.getElementById("auth-modal-overlay");
   const closeBtn = document.getElementById("auth-close-btn");
   const authCard = document.getElementById("auth-card-content");
-
   if (!openBtn || !overlay || !closeBtn || !authCard) return;
 
-  const toggleModal = (isOpen) => {
-    overlay.classList.toggle("active", isOpen);
-  };
+  const toggleModal = (isOpen) => overlay.classList.toggle("active", isOpen);
+  const renderNotice = (message = "") => message ? `<p class="auth-action-notice">${message}</p>` : "";
 
-  openBtn.onclick = () => {
-    renderAuthCardContent();
+  window.openCorexAuthModal = (mode = "login", message = "") => {
+    if (mode === "register") renderRegisterCardContent(message);
+    else renderAuthCardContent(message);
     toggleModal(true);
   };
+
+  openBtn.onclick = () => { renderAuthCardContent(); toggleModal(true); };
   closeBtn.onclick = () => toggleModal(false);
+  overlay.onclick = (event) => { if (event.target === overlay) toggleModal(false); };
 
-  overlay.onclick = (e) => {
-    if (e.target === overlay) toggleModal(false);
-  };
-
-  function renderAuthCardContent() {
+  function renderAuthCardContent(message = "") {
     if (state.currentUser) {
-      const firstInitial = state.currentUser.name.charAt(0).toUpperCase();
+      const displayName = state.currentUser.name || state.currentUser.fullName || "COREX Member";
+      const firstInitial = displayName.charAt(0).toUpperCase();
+      const isAdmin = isAdminUser();
       authCard.innerHTML = `
         <div class="auth-profile-box">
           <div class="profile-avatar">${firstInitial}</div>
-          <h3 class="profile-name">Hello, ${state.currentUser.name}!</h3>
-          <span class="profile-email">${state.currentUser.email}</span>
-          <p style="font-size:0.85rem; color:var(--text-secondary);">Welcome back to your COREX premium member hub.</p>
+          <h3 class="profile-name">Hello, ${displayName}!</h3>
+          <span class="profile-email">${state.currentUser.email || ""}</span>
+          <p style="font-size:.85rem;color:var(--text-secondary);">${isAdmin ? "Administrator account is active." : "Your COREX account is active on this device."}</p>
+          ${isAdmin ? '<button class="btn btn-primary btn-full" id="profile-dashboard-btn">Back to Dashboard</button>' : ""}
           <button class="btn btn-secondary btn-full" id="logout-btn">Log Out</button>
-        </div>
-      `;
-
+        </div>`;
+      document.getElementById("profile-dashboard-btn")?.addEventListener("click", () => { toggleModal(false); navigateTo("admin"); });
       document.getElementById("logout-btn").onclick = () => {
-        state.currentUser = null;
-        saveToStorage();
+        signOutCurrentUser();
+        toggleModal(false);
+        navigateTo("home", {}, { replace: true });
         showToast("Logged out successfully.");
-        renderAuthCardContent();
       };
-    } else {
-      authCard.innerHTML = `
-        <h3 class="auth-modal-title">Sign In</h3>
-        <p class="auth-modal-subtitle">Log in to track orders and save your favorites.</p>
-        <form class="auth-form" id="login-form">
-          <div class="form-group">
-            <label for="login-email">Email Address</label>
-            <input type="email" id="login-email" required placeholder="you@example.com">
-          </div>
-          <div class="form-group">
-            <label for="login-password">Password</label>
-            <input type="password" id="login-password" required placeholder="••••••••">
-          </div>
-          <button type="submit" class="btn btn-primary btn-full" style="margin-top:0.5rem;">Log In</button>
-        </form>
-        <div class="auth-switch">
-          Don't have an account? <button class="auth-switch-btn" id="go-register-btn">Register here</button>
-        </div>
-      `;
-
-      document.getElementById("login-form").onsubmit = async (e) => {
-        e.preventDefault();
-        const email = document.getElementById("login-email").value.trim().toLowerCase();
-        const password = document.getElementById("login-password").value;
-
-        try {
-          if (!window.CorexMockApi) throw new Error("MockAPI configuration is unavailable.");
-          // The fixed admin account is available from a fresh MockAPI project as well.
-          // The admin page will create/update its remote record before opening the dashboard.
-          if (window.CorexMockApi.isFixedAdminCredentials(email, password)) {
-            state.currentUser = { name: "COREX Administrator", email, role: "admin" };
-            saveToStorage();
-            sessionStorage.setItem("corex_admin_session", "true");
-            toggleModal(false);
-            navigateTo("admin");
-            return;
-          }
-          const users = await window.CorexMockApi.listUsers();
-          const user = users.find(item => String(item.email || "").toLowerCase() === email && String(item.password || "") === password);
-          if (!user) {
-            showToast("Incorrect email or password.", "error");
-            return;
-          }
-
-          state.currentUser = { ...user, name: user.name || user.fullName || "COREX Customer" };
-          saveToStorage();
-
-          if (user.role === "admin") {
-            sessionStorage.setItem("corex_admin_session", "true");
-            toggleModal(false);
-            navigateTo("admin");
-            return;
-          }
-
-          showToast("Welcome back to COREX!", "success");
-          renderAuthCardContent();
-        } catch (error) {
-          console.error("COREX login failed:", error);
-          showToast("Could not sign in because the account service is unavailable.", "error");
-        }
-      };
-
-      document.getElementById("go-register-btn").onclick = () => {
-        renderRegisterCardContent();
-      };
+      return;
     }
+
+    authCard.innerHTML = `
+      <h3 class="auth-modal-title">Sign In</h3>
+      <p class="auth-modal-subtitle">Sign in to add products, save favorites, and complete checkout.</p>
+      ${renderNotice(message)}
+      <form class="auth-form" id="login-form">
+        <div class="form-group"><label for="login-email">Email Address</label><input type="email" id="login-email" required autocomplete="email" placeholder="you@example.com"></div>
+        <div class="form-group"><label for="login-password">Password</label><input type="password" id="login-password" required autocomplete="current-password" placeholder="••••••••"></div>
+        <button type="submit" class="btn btn-primary btn-full" style="margin-top:.5rem;">Log In</button>
+      </form>
+      <div class="auth-switch">Don't have an account? <button class="auth-switch-btn" id="go-register-btn">Register here</button></div>`;
+
+    document.getElementById("login-form").onsubmit = async (event) => {
+      event.preventDefault();
+      const email = document.getElementById("login-email").value.trim().toLowerCase();
+      const password = document.getElementById("login-password").value;
+      try {
+        if (!window.CorexMockApi) throw new Error("MockAPI configuration is unavailable.");
+        if (window.CorexMockApi.isFixedAdminCredentials(email, password)) {
+          // The embedded admin page reads this same explicit browser session and enters its dashboard directly.
+          establishSignedInUser({ name: "COREX Administrator", email, role: "admin" });
+          localStorage.setItem(COREX_ADMIN_SESSION_KEY, "true");
+          toggleModal(false);
+          navigateTo("admin");
+          return;
+        }
+        const users = await window.CorexMockApi.listUsers();
+        const user = users.find(item => String(item.email || "").toLowerCase() === email && String(item.password || "") === password);
+        if (!user) { showToast("Incorrect email or password.", "error"); return; }
+        establishSignedInUser(user);
+        toggleModal(false);
+        if (isAdminUser(user)) {
+          localStorage.setItem(COREX_ADMIN_SESSION_KEY, "true");
+          navigateTo("admin");
+        } else {
+          showToast("Welcome back to COREX!", "success");
+          navigateTo("home", {}, { replace: true });
+        }
+      } catch (error) {
+        console.error("COREX login failed:", error);
+        showToast("Could not sign in because the account service is unavailable.", "error");
+      }
+    };
+    document.getElementById("go-register-btn").onclick = () => renderRegisterCardContent();
   }
 
-  function renderRegisterCardContent() {
+  function renderRegisterCardContent(message = "") {
     authCard.innerHTML = `
       <h3 class="auth-modal-title">Create Account</h3>
-      <p class="auth-modal-subtitle">Join COREX community for free shipping and member rewards.</p>
-      <form class="auth-form" id="register-form">
-        <div class="form-group">
-          <label for="reg-name">Full Name</label>
-          <input type="text" id="reg-name" required placeholder="Jane Doe">
-        </div>
-        <div class="form-group">
-          <label for="reg-email">Email Address</label>
-          <input type="email" id="reg-email" required placeholder="jane@example.com">
-        </div>
-        <div class="form-group">
-          <label for="reg-password">Password</label>
-          <input type="password" id="reg-password" required placeholder="••••••••">
-        </div>
-        <button type="submit" class="btn btn-primary btn-full" style="margin-top:0.5rem;">Create Account</button>
+      <p class="auth-modal-subtitle">Create your account to unlock cart, checkout and member rewards.</p>
+      ${renderNotice(message)}
+      <form class="auth-form" id="register-form" novalidate>
+        <div class="form-group"><label for="reg-name">Full Name</label><input type="text" id="reg-name" required autocomplete="name" placeholder="Jane Doe"></div>
+        <div class="form-group"><label for="reg-email">Email Address</label><input type="email" id="reg-email" required autocomplete="email" placeholder="jane@example.com"></div>
+        <div class="form-group"><label for="reg-phone">Phone Number</label><input type="tel" id="reg-phone" required autocomplete="tel" placeholder="0123 456 789"></div>
+        <div class="form-group"><label for="reg-address">Address</label><input type="text" id="reg-address" required autocomplete="street-address" placeholder="House number, street, ward, district"></div>
+        <div class="form-group"><label for="reg-password">Password</label><input type="password" id="reg-password" required autocomplete="new-password" placeholder="At least 8 characters"></div>
+        <div class="form-group"><label for="reg-confirm-password">Re-enter Password</label><input type="password" id="reg-confirm-password" required autocomplete="new-password" placeholder="Repeat your password"></div>
+        <p class="password-hint">Password must contain at least 8 characters, one uppercase letter, one number, and one special character.</p>
+        <button type="submit" class="btn btn-primary btn-full" style="margin-top:.5rem;">Create Account</button>
       </form>
-      <div class="auth-switch">
-        Already have an account? <button class="auth-switch-btn" id="go-login-btn">Sign In</button>
-      </div>
-    `;
+      <div class="auth-switch">Already have an account? <button class="auth-switch-btn" id="go-login-btn">Sign In</button></div>`;
 
-    document.getElementById("register-form").onsubmit = async (e) => {
-      e.preventDefault();
+    document.getElementById("register-form").onsubmit = async (event) => {
+      event.preventDefault();
       const name = document.getElementById("reg-name").value.trim();
       const email = document.getElementById("reg-email").value.trim().toLowerCase();
+      const phone = document.getElementById("reg-phone").value.trim();
+      const address = document.getElementById("reg-address").value.trim();
       const password = document.getElementById("reg-password").value;
+      const confirmPassword = document.getElementById("reg-confirm-password").value;
+      const passwordValid = /^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/.test(password);
+
+      if (!name || !email || !phone || !address) { showToast("Complete every registration field.", "error"); return; }
+      if (!validateEmail(email)) { showToast("Enter a valid email address.", "error"); return; }
+      if (!validatePhone(phone)) { showToast("Enter a valid phone number.", "error"); return; }
+      if (!passwordValid) { showToast("Password needs an uppercase letter, number, special character, and at least 8 characters.", "error"); return; }
+      if (password !== confirmPassword) { showToast("Password and re-enter password must match.", "error"); return; }
 
       try {
         if (!window.CorexMockApi) throw new Error("MockAPI configuration is unavailable.");
         const users = await window.CorexMockApi.listUsers();
-        if (users.some(user => String(user.email || "").toLowerCase() === email)) {
-          showToast("An account with this email already exists.", "error");
-          return;
-        }
-
+        if (users.some(user => String(user.email || "").toLowerCase() === email)) { showToast("An account with this email already exists.", "error"); return; }
         const created = await window.CorexMockApi.createUser(window.CorexMockApi.userPayload({
-          name,
-          email,
-          password,
-          role: "customer",
-          orders: [],
-          totalSpentVnd: 0,
-          monthlySpendVnd: 0
+          name, fullName: name, email, phone, address, defaultAddress: address,
+          password, role: "customer", orders: [], totalSpentVnd: 0, monthlySpendVnd: 0
         }));
-
-        state.currentUser = { ...created, name: created.name || name };
-        saveToStorage();
-        showToast("Account created successfully!", "success");
-        renderAuthCardContent();
+        establishSignedInUser(created);
+        toggleModal(false);
+        showToast("Account created successfully. Your delivery details are saved.", "success");
       } catch (error) {
         console.error("COREX registration failed:", error);
         showToast("Could not create account because the account service is unavailable.", "error");
       }
     };
-
-    document.getElementById("go-login-btn").onclick = () => {
-      renderAuthCardContent();
-    };
+    document.getElementById("go-login-btn").onclick = () => renderAuthCardContent();
   }
 }
 
@@ -3487,6 +3594,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindAuthModal();
   bindMobileMenu();
   bindSidebarFilters();
+  updateHeaderAccountControls();
 
   renderHomeView();
 
@@ -3499,9 +3607,8 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("message", (event) => {
     if (event.origin !== window.location.origin || event.data?.source !== "corex-admin") return;
     if (event.data.type === "logout") {
-      state.currentUser = null;
-      saveToStorage();
-      navigateTo("home");
+      signOutCurrentUser();
+      navigateTo("home", {}, { replace: true });
       showToast("Administrator signed out.");
     }
   });

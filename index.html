@@ -38,6 +38,11 @@
       <!-- Action items -->
       <div class="header-actions">
 
+        <!-- Visible only for a signed-in administrator; takes the user back to #admin. -->
+        <button class="admin-dashboard-nav-btn" id="admin-dashboard-nav-btn" type="button" hidden onclick="navigateTo('admin'); return false;">
+          Back to Dashboard
+        </button>
+
         <!-- Search trigger -->
         <button class="header-btn" id="search-open-btn" aria-label="Open Search">
           <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -99,7 +104,7 @@
         </div>
       </div>
 
-      <!-- Trust Bar (Threshold changed to $75) -->
+      <!-- Trust Bar: Free standard shipping threshold is 1.875.000 ₫ -->
       <div class="trust-bar">
         <div class="container trust-container">
           <div class="trust-item">
@@ -135,7 +140,7 @@
             </div>
             <div>
               <div class="trust-title">Free Shipping</div>
-              <div class="trust-text">On orders over $75</div>
+              <div class="trust-text">On orders over 1.875.000 ₫</div>
             </div>
           </div>
         </div>
@@ -354,9 +359,9 @@
               <h3 class="filter-section-title">Price Range</h3>
               <div class="price-range-wrap">
                 <div class="price-range-inputs">
-                  <input type="number" id="price-min" placeholder="Min" min="0">
+                  <input type="number" id="price-min" placeholder="Min (VNĐ)" min="0" step="1000">
                   <span style="color:var(--text-secondary);">-</span>
-                  <input type="number" id="price-max" placeholder="Max" min="0">
+                  <input type="number" id="price-max" placeholder="Max (VNĐ)" min="0" step="1000">
                 </div>
               </div>
             </div>
@@ -407,6 +412,8 @@
                     <option value="featured">Featured</option>
                     <option value="price-low">Price Low to High</option>
                     <option value="price-high">Price High to Low</option>
+                    <option value="most-purchased">Most Purchased</option>
+                    <option value="least-purchased">Least Purchased</option>
                     <option value="rating">Best Rating</option>
                     <option value="newest">Newest</option>
                   </select>
@@ -596,7 +603,7 @@
 
               <div class="detail-tab-content" id="tab-content-shipping">
                 <p><strong>Shipping Policy:</strong></p>
-                <p>Standard delivery takes 3-5 business days. Express shipping delivery takes 1-2 business days. Free standard shipping applies to all orders above $75.</p>
+                <p>Standard delivery takes 3-5 business days. Express shipping delivery takes 1-2 business days. Free standard shipping applies to all orders above 1.875.000 ₫.</p>
                 <br>
                 <p><strong>Returns:</strong></p>
                 <p>We accept clean, unworn returns within 30 days of purchase. Return shipping labels are generated automatically through your online account panel.</p>
@@ -687,31 +694,42 @@
             <!-- Shipping Form -->
             <div>
               <h3 class="checkout-block-title">SHIPPING INFORMATION</h3>
-              <form class="form-grid">
+              <div class="checkout-account-address-bar" id="checkout-account-address-bar">
+                <div>
+                  <strong>Use account delivery details</strong>
+                  <span id="checkout-account-address-note">Your saved customer information will appear here.</span>
+                </div>
+                <button type="button" class="btn btn-secondary checkout-fill-account-btn" id="checkout-fill-account-btn">Use saved details</button>
+              </div>
+              <form class="form-grid" id="checkout-shipping-form" novalidate>
                 <div class="form-group form-grid-full">
                   <label for="checkout-name">Full Name</label>
-                  <input type="text" id="checkout-name" placeholder="Minh Tâm" value="Minh Tâm">
+                  <input type="text" id="checkout-name" autocomplete="name" placeholder="Your full name">
                 </div>
                 <div class="form-group">
                   <label for="checkout-phone">Phone Number</label>
-                  <input type="tel" id="checkout-phone" placeholder="0123 456 789" value="0123 456 789">
+                  <input type="tel" id="checkout-phone" autocomplete="tel" placeholder="0123 456 789">
                 </div>
                 <div class="form-group">
                   <label for="checkout-email">Email Address</label>
-                  <input type="email" id="checkout-email" placeholder="minhtam@email.com" value="minhtam@email.com">
+                  <input type="email" id="checkout-email" autocomplete="email" placeholder="you@example.com">
                 </div>
                 <div class="form-group form-grid-full">
                   <label for="checkout-address">Delivery Address</label>
-                  <input type="text" id="checkout-address" placeholder="123 Nguyễn Huệ, Quận 1" value="123 Nguyễn Huệ, Quận 1">
+                  <input type="text" id="checkout-address" autocomplete="street-address" placeholder="House number, street, ward, district">
                 </div>
                 <div class="form-group">
-                  <label for="checkout-city">City / Province</label>
-                  <input type="text" id="checkout-city" placeholder="Hồ Chí Minh" value="Hồ Chí Minh">
+                  <label for="checkout-city">City / Province <span class="optional-label">(optional)</span></label>
+                  <input type="text" id="checkout-city" autocomplete="address-level1" placeholder="Hồ Chí Minh">
                 </div>
                 <div class="form-group">
-                  <label for="checkout-district">District</label>
-                  <input type="text" id="checkout-district" placeholder="Quận 1" value="Quận 1">
+                  <label for="checkout-district">District <span class="optional-label">(optional)</span></label>
+                  <input type="text" id="checkout-district" autocomplete="address-level2" placeholder="Quận 1">
                 </div>
+                <label class="checkout-save-address-row form-grid-full">
+                  <input type="checkbox" id="checkout-save-address" checked>
+                  Save these delivery details to my COREX account
+                </label>
               </form>
             </div>
 
@@ -723,7 +741,7 @@
                   <input type="radio" name="shipping-method" class="method-radio" checked>
                   <div class="method-details">
                     <span class="method-name">Standard Shipping (3-5 days)</span>
-                    <span class="method-desc">Free for orders above $75.</span>
+                    <span class="method-desc">Free for orders above 1.875.000 ₫.</span>
                   </div>
                   <span class="method-price">Free</span>
                 </div>
@@ -733,7 +751,7 @@
                     <span class="method-name">Express Shipping (1-2 days)</span>
                     <span class="method-desc">Deliveries within 1-2 business days.</span>
                   </div>
-                  <span class="method-price">$5.00</span>
+                  <span class="method-price">125.000 ₫</span>
                 </div>
               </div>
             </div>
@@ -794,19 +812,19 @@
             <div style="border-top: 1px solid var(--border-color); padding-top: 1.5rem; margin-top: 1.5rem;">
               <div class="summary-row">
                 <span>Subtotal</span>
-                <span id="checkout-subtotal">$0.00</span>
+                <span id="checkout-subtotal">0 ₫</span>
               </div>
               <div class="summary-row" id="checkout-discount-row" style="display:none; color:var(--accent-primary);">
                 <span>Discount</span>
-                <span id="checkout-discount">-$0.00</span>
+                <span id="checkout-discount">-0 ₫</span>
               </div>
               <div class="summary-row">
                 <span>Shipping</span>
-                <span id="checkout-shipping">$0.00</span>
+                <span id="checkout-shipping">0 ₫</span>
               </div>
               <div class="summary-row total-row" style="margin-bottom:2rem;">
                 <span>Total</span>
-                <span id="checkout-total">$0.00</span>
+                <span id="checkout-total">0 ₫</span>
               </div>
               
               <button class="btn btn-primary btn-full" id="place-order-btn">Place Order</button>
@@ -866,7 +884,7 @@
           </div>
           <div class="order-detail-row">
             <span class="order-detail-label">Amount Paid:</span>
-            <span class="order-detail-val" id="success-order-total" style="color:var(--accent-primary); font-size:1.1rem;">$0.00</span>
+            <span class="order-detail-val" id="success-order-total" style="color:var(--accent-primary); font-size:1.1rem;">0 ₫</span>
           </div>
         </div>
 
@@ -946,6 +964,7 @@
       <a href="#" onclick="navigateTo('shop', { category: 'accessories' }); return false;" class="mobile-nav-link">Accessories</a>
       <a href="#" onclick="navigateTo('shop', { category: 'new' }); return false;" class="mobile-nav-link">New Arrivals</a>
       <a href="#" onclick="navigateTo('shop', { category: 'sale' }); return false;" class="mobile-nav-link">Sale</a>
+      <a href="#admin" id="mobile-admin-dashboard-link" onclick="navigateTo('admin'); return false;" class="mobile-nav-link mobile-admin-dashboard-link" hidden>Back to Dashboard</a>
     </nav>
   </div>
 
