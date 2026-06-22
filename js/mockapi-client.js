@@ -37,6 +37,73 @@
     return fallback;
   }
 
+
+  const REVIEW_TEMPLATES = Object.freeze([
+    { name: "Minh Anh", rating: 5, content: "Chất vải mềm, mặc ôm vừa vặn và đúng như mô tả. Tôi sẽ quay lại mua thêm màu khác." },
+    { name: "Ngọc Hà", rating: 5, content: "Thiết kế đẹp, đường may gọn và dùng khi tập rất thoải mái. Giao hàng đóng gói cẩn thận." },
+    { name: "Tuấn Khang", rating: 4, content: "Sản phẩm tốt, form chuẩn và dùng cho buổi tập hằng ngày rất ổn." }
+  ]);
+
+  function hasReviewCollection(product) {
+    return Boolean(product) && (
+      Object.prototype.hasOwnProperty.call(product, "reviewItems") ||
+      Object.prototype.hasOwnProperty.call(product, "reviewsData")
+    );
+  }
+
+  function normalizeReview(review, index = 0, product = {}) {
+    const rating = Math.max(1, Math.min(5, asNumber(review?.rating, 5)));
+    return {
+      id: String(review?.id || `seed-${product.legacyId || product.id || "product"}-${index + 1}`),
+      userId: review?.userId ? String(review.userId) : "seed-customer",
+      name: String(review?.name || review?.authorName || "COREX Customer"),
+      email: String(review?.email || ""),
+      rating,
+      content: String(review?.content || review?.comment || "Great product and a smooth COREX experience."),
+      verifiedPurchase: Boolean(review?.verifiedPurchase),
+      createdAt: review?.createdAt || review?.date || new Date(Date.UTC(2026, 0, Math.max(1, index + 1))).toISOString()
+    };
+  }
+
+  function buildSeedReviews(product = {}) {
+    const id = Math.abs(asNumber(product.legacyId ?? product.id, 1));
+    const isBestSeller = asBoolean(product.isBestSeller) || String(product.badge || "").toLowerCase() === "best seller";
+    const selected = [
+      REVIEW_TEMPLATES[id % REVIEW_TEMPLATES.length],
+      REVIEW_TEMPLATES[(id + 1) % REVIEW_TEMPLATES.length],
+      REVIEW_TEMPLATES[(id + 2) % REVIEW_TEMPLATES.length]
+    ];
+    return selected.map((template, index) => normalizeReview({
+      ...template,
+      rating: isBestSeller ? 5 : template.rating,
+      createdAt: new Date(Date.UTC(2026, 4 - index, Math.max(1, 21 - index * 6))).toISOString(),
+      verifiedPurchase: true,
+      id: `seed-${product.legacyId || product.id || "product"}-${index + 1}`
+    }, index, product));
+  }
+
+  function getReviewItems(product = {}, useFallback = true) {
+    const direct = product.reviewItems !== undefined ? product.reviewItems : product.reviewsData;
+    if (hasReviewCollection(product)) return asArray(direct).map((review, index) => normalizeReview(review, index, product));
+    return useFallback ? buildSeedReviews(product) : [];
+  }
+
+  function calculateReviewAverage(reviewItems, fallback = 0) {
+    const list = Array.isArray(reviewItems) ? reviewItems : [];
+    if (!list.length) return asNumber(fallback, 0);
+    return Number((list.reduce((sum, review) => sum + asNumber(review.rating, 0), 0) / list.length).toFixed(1));
+  }
+
+  function getDisplayRating(product = {}) {
+    if (asBoolean(product.isBestSeller) || String(product.badge || "").toLowerCase() === "best seller") return 5;
+    const directReviews = getReviewItems(product, false);
+    return calculateReviewAverage(directReviews, asNumber(product.rating, 0));
+  }
+
+  function getReviewCount(product = {}) {
+    return Math.max(asNumber(product.reviews), getReviewItems(product).length);
+  }
+
   function isFixedAdminCredentials(email, password) {
     return String(email || "").trim().toLowerCase() === String(config.ADMIN_EMAIL || "admin@corex.com").toLowerCase()
       && String(password || "") === String(config.ADMIN_PASSWORD || "01");
@@ -86,6 +153,13 @@
     asNumber,
     asBoolean,
     isFixedAdminCredentials,
+    hasReviewCollection,
+    normalizeReview,
+    buildSeedReviews,
+    getReviewItems,
+    calculateReviewAverage,
+    getDisplayRating,
+    getReviewCount,
 
     listProducts() {
       return request(config.PRODUCT_RESOURCE || "Product");
@@ -121,6 +195,10 @@
 
     productPayload(product) {
       const now = new Date().toISOString();
+      const isBestSeller = asBoolean(product.isBestSeller) || String(product.badge || "").toLowerCase() === "best seller";
+      const reviewItems = getReviewItems(product);
+      const reviewCount = Math.max(asNumber(product.reviews), reviewItems.length);
+      const calculatedRating = isBestSeller ? 5 : calculateReviewAverage(reviewItems, asNumber(product.rating));
       return {
         ...product,
         legacyId: product.legacyId || product.id,
@@ -128,13 +206,18 @@
         colors: Array.isArray(product.colors) ? product.colors : asArray(product.colors),
         sizes: Array.isArray(product.sizes) ? product.sizes : asArray(product.sizes),
         galleryImages: Array.isArray(product.galleryImages) ? product.galleryImages : asArray(product.galleryImages),
+        reviewItems,
+        reviewsData: reviewItems,
+        rating: calculatedRating,
+        reviews: reviewCount,
         price: asNumber(product.price),
         oldPrice: product.oldPrice === null || product.oldPrice === undefined || product.oldPrice === "" ? null : asNumber(product.oldPrice),
         stock: asNumber(product.stock, 100),
         soldCount: asNumber(product.soldCount),
-        isBestSeller: asBoolean(product.isBestSeller),
+        isBestSeller,
         isNewArrival: asBoolean(product.isNewArrival),
         isSale: asBoolean(product.isSale),
+        badge: isBestSeller ? "Best Seller" : product.badge,
         updatedAt: now,
         createdAt: product.createdAt || now
       };
@@ -142,6 +225,8 @@
 
     normalizeProduct(record) {
       const legacyId = record.legacyId ?? record.id;
+      const isBestSeller = asBoolean(record.isBestSeller) || String(record.badge || "").toLowerCase() === "best seller";
+      const reviewItems = getReviewItems(record);
       return {
         ...record,
         id: Number.isFinite(Number(legacyId)) ? Number(legacyId) : legacyId,
@@ -151,14 +236,38 @@
         colors: asArray(record.colors),
         sizes: asArray(record.sizes),
         galleryImages: asArray(record.galleryImages, record.imageUrl ? [record.imageUrl] : []),
-        rating: asNumber(record.rating),
-        reviews: asNumber(record.reviews),
+        reviewItems,
+        reviewsData: reviewItems,
+        rating: isBestSeller ? 5 : asNumber(record.rating),
+        reviews: Math.max(asNumber(record.reviews), reviewItems.length),
         stock: asNumber(record.stock, 100),
         soldCount: asNumber(record.soldCount),
-        isBestSeller: asBoolean(record.isBestSeller),
+        isBestSeller,
         isNewArrival: asBoolean(record.isNewArrival),
-        isSale: asBoolean(record.isSale)
+        isSale: asBoolean(record.isSale),
+        badge: isBestSeller ? "Best Seller" : record.badge
       };
+    },
+
+    async ensureBestSellerReviewIntegrity(records = null) {
+      const products = Array.isArray(records) ? records : await api.listProducts();
+      const tasks = [];
+      for (const record of products || []) {
+        const isBestSeller = asBoolean(record.isBestSeller) || String(record.badge || "").toLowerCase() === "best seller";
+        if (!isBestSeller) continue;
+        const needsSeed = !hasReviewCollection(record);
+        const needsRating = asNumber(record.rating) !== 5 || String(record.badge || "") !== "Best Seller";
+        if (!needsSeed && !needsRating) continue;
+        const payload = api.productPayload({
+          ...record,
+          isBestSeller: true,
+          badge: "Best Seller",
+          reviewItems: needsSeed ? buildSeedReviews(record) : getReviewItems(record, false),
+          rating: 5
+        });
+        tasks.push(api.updateProduct(record.id, payload));
+      }
+      return Promise.allSettled(tasks);
     },
 
     getUserSpend(user) {

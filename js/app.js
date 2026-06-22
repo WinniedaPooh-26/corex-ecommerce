@@ -1425,6 +1425,9 @@ let PRODUCTS = [
   }
 ];
 
+// Normalize review collections before the catalog is used by storefront, admin seed or MockAPI sync.
+PRODUCTS = PRODUCTS.map(hydrateProductReviewState);
+
 // Shared source snapshot used by MockAPI bootstrap and admin catalog sync.
 window.COREX_LOCAL_PRODUCTS = JSON.parse(JSON.stringify(PRODUCTS));
 
@@ -1450,8 +1453,13 @@ async function mergeMockApiCatalogIntoStorefront() {
         }
       });
 
-    PRODUCTS = merged;
+    PRODUCTS = merged.map(hydrateProductReviewState);
     window.COREX_LOCAL_PRODUCTS = JSON.parse(JSON.stringify(PRODUCTS));
+
+    // Seed review records and enforce 5.0 Best Seller ratings in MockAPI without blocking the storefront.
+    window.CorexMockApi.ensureBestSellerReviewIntegrity?.(remoteProducts).catch(error => {
+      console.warn("COREX: Best Seller review bootstrap did not complete.", error);
+    });
 
     // Refresh the view only after MockAPI has returned valid records.
     if (document.readyState !== "loading") {
@@ -1501,6 +1509,64 @@ function getProductBadge(product) {
 }
 
 
+// ==========================================
+// 1.2 VERIFIED REVIEWS + RATING HELPERS
+// Best Sellers always carry the required 5.0-star visual rating.
+// Customer review records are stored in MockAPI Product.reviewItems.
+// ==========================================
+function getProductReviewItems(product) {
+  if (window.CorexMockApi?.getReviewItems) return window.CorexMockApi.getReviewItems(product);
+  return Array.isArray(product?.reviewItems) ? product.reviewItems : [];
+}
+
+function getProductDisplayRating(product) {
+  if (product?.isBestSeller) return 5;
+  if (window.CorexMockApi?.getDisplayRating) return window.CorexMockApi.getDisplayRating(product);
+  return Number(product?.rating || 0);
+}
+
+function getProductReviewCount(product) {
+  if (window.CorexMockApi?.getReviewCount) return window.CorexMockApi.getReviewCount(product);
+  return Math.max(Number(product?.reviews || 0), getProductReviewItems(product).length);
+}
+
+function hydrateProductReviewState(product) {
+  if (!product) return product;
+  product.reviewItems = getProductReviewItems(product);
+  product.reviewsData = product.reviewItems;
+  product.reviews = getProductReviewCount(product);
+  product.rating = getProductDisplayRating(product);
+  if (product.isBestSeller) {
+    product.rating = 5;
+    product.badge = "Best Seller";
+  }
+  return product;
+}
+
+function starsMarkup(rating, { size = 14, label = "" } = {}) {
+  const normalized = Math.max(0, Math.min(5, Number(rating || 0)));
+  const fullStars = Math.round(normalized);
+  const aria = label || `${normalized.toFixed(1)} out of 5 stars`;
+  let stars = `<span class="star-row" role="img" aria-label="${aria}">`;
+  for (let i = 0; i < 5; i++) {
+    const active = i < fullStars;
+    stars += `<svg viewBox="0 0 24 24" width="${size}" height="${size}" style="${active ? 'fill:#F5A623;stroke:#F5A623;' : 'fill:none;stroke:#c8c8c8;'}"><polygon points="12,2 15,9 22,9 17,14 19,21 12,17 5,21 7,14 2,9 9,9" /></svg>`;
+  }
+  return `${stars}</span>`;
+}
+
+function escapeReviewHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, character => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+  }[character]));
+}
+
+function formatReviewDate(value) {
+  const date = new Date(value || Date.now());
+  return Number.isNaN(date.getTime()) ? "Recently" : date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+
 
 // ==========================================
 // 2. STATE MANAGER
@@ -1516,6 +1582,7 @@ const state = {
     color: [],
     priceMin: "",
     priceMax: "",
+    rating: [],
     material: []
   },
   activeSort: "featured",
@@ -2150,11 +2217,9 @@ function createProductCard(product) {
   card.className = "product-card";
   card.dataset.id = product.id;
 
-  let stars = "";
-  const fullStars = Math.floor(product.rating);
-  for (let i = 0; i < 5; i++) {
-    stars += `<svg viewBox="0 0 24 24" style="${i < fullStars ? 'fill: #F5A623; stroke: #F5A623;' : 'fill: none; stroke: #ccc;'}"><polygon points="12,2 15,9 22,9 17,14 19,21 12,17 5,21 7,14 2,9 9,9" /></svg>`;
-  }
+  const displayRating = getProductDisplayRating(product);
+  const reviewCount = getProductReviewCount(product);
+  const stars = starsMarkup(displayRating, { size: 14, label: `${product.name}: ${displayRating.toFixed(1)} out of 5 stars` });
 
   let priceHTML = `<span class="product-card-price">${formatPrice(product.price)}</span>`;
   if (product.oldPrice) {
@@ -2201,8 +2266,8 @@ function createProductCard(product) {
     </div>
     <div class="product-card-info" onclick="navigateTo('detail', { id: ${product.id} })">
       <div class="product-card-rating">
-        <div style="display:flex;">${stars}</div>
-        <span>(${product.reviews})</span>
+        ${stars}
+        <span>${displayRating.toFixed(1)} · (${reviewCount})</span>
       </div>
       <h3 class="product-card-name">${product.name}</h3>
       <div class="product-card-price-row">
@@ -2316,8 +2381,12 @@ function renderShopView() {
     filtered = filtered.filter(p => toVnd(p.price) <= Number(state.activeFilters.priceMax));
   }
 
+  if (state.activeFilters.rating.length > 0) {
+    filtered = filtered.filter(product => state.activeFilters.rating.some(minimum => getProductDisplayRating(product) >= Number(minimum)));
+  }
+
   if (state.activeFilters.material.length > 0) {
-    filtered = filtered.filter(p => state.activeFilters.material.some(m => p.material.toLowerCase().includes(m.toLowerCase())));
+    filtered = filtered.filter(p => state.activeFilters.material.some(m => String(p.material || "").toLowerCase().includes(m.toLowerCase())));
   }
 
   if (state.activeSort === "price-low") {
@@ -2329,7 +2398,7 @@ function renderShopView() {
   } else if (state.activeSort === "least-purchased") {
     filtered.sort((a, b) => Number(a.soldCount || 0) - Number(b.soldCount || 0));
   } else if (state.activeSort === "rating") {
-    filtered.sort((a, b) => b.rating - a.rating);
+    filtered.sort((a, b) => getProductDisplayRating(b) - getProductDisplayRating(a));
   } else if (state.activeSort === "newest") {
     filtered.sort((a, b) => (b.badge === "New" ? 1 : 0) - (a.badge === "New" ? 1 : 0));
   }
@@ -2379,6 +2448,7 @@ function resetFilters(triggerRender = false) {
     color: [],
     priceMin: "",
     priceMax: "",
+    rating: [],
     material: []
   };
 
@@ -2416,6 +2486,11 @@ function renderActiveFilterPills() {
   state.activeFilters.color.forEach(col => {
     hasFilters = true;
     createPill(row, "color", col, `Color: ${col}`);
+  });
+
+  state.activeFilters.rating.forEach(minimum => {
+    hasFilters = true;
+    createPill(row, "rating", minimum, `${minimum}★ & up`);
   });
 
   if (state.activeFilters.priceMin !== "" || state.activeFilters.priceMax !== "") {
@@ -2533,18 +2608,13 @@ function renderProductDetailView() {
     }
   }
 
-  document.getElementById("detail-rating-num").textContent = prod.rating.toFixed(1);
-  document.getElementById("detail-rating-count").textContent = `(${prod.reviews} reviews)`;
+  const detailRating = getProductDisplayRating(prod);
+  const detailReviewCount = getProductReviewCount(prod);
+  document.getElementById("detail-rating-num").textContent = detailRating.toFixed(1);
+  document.getElementById("detail-rating-count").textContent = `(${detailReviewCount} reviews)`;
   
   const starsBox = document.getElementById("detail-rating-stars");
-  if (starsBox) {
-    let stars = "";
-    const fullStars = Math.floor(prod.rating);
-    for (let i = 0; i < 5; i++) {
-      stars += `<svg viewBox="0 0 24 24" style="${i < fullStars ? 'fill: #F5A623; stroke: #F5A623;' : 'fill: none; stroke: #ccc;'}"><polygon points="12,2 15,9 22,9 17,14 19,21 12,17 5,21 7,14 2,9 9,9" /></svg>`;
-    }
-    starsBox.innerHTML = stars;
-  }
+  if (starsBox) starsBox.innerHTML = starsMarkup(detailRating, { size: 18, label: `${prod.name}: ${detailRating.toFixed(1)} out of 5 stars` });
 
   document.getElementById("detail-desc-text").textContent = prod.description;
   document.getElementById("detail-spec-material").textContent = prod.material;
@@ -2706,35 +2776,140 @@ function renderProductDetailView() {
 
 function renderProductReviews(product) {
   const container = document.getElementById("tab-content-reviews");
-  if (!container) return;
+  if (!container || !product) return;
 
-  const demoReviews = [
-    { name: "Jessica M.", rating: 5, date: "May 14, 2026", content: "Absolutely love the soft feel of the fabric! Stretches perfectly during yoga flow and holds shape afterward. Will buy more colors." },
-    { name: "David K.", rating: 4.5, date: "April 28, 2026", content: "Great fit and keeps me dry during workout sessions. The materials feel premium. Fit was true to size." },
-    { name: "Emily R.", rating: 5, date: "March 19, 2026", content: "Highly recommend COREX. Best quality activewear I've ever owned. Very breathable and squat proof!" }
-  ];
+  const reviews = getProductReviewItems(product).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  const rating = getProductDisplayRating(product);
+  const reviewCount = getProductReviewCount(product);
+  const isAdmin = isAdminUser();
+  const isSignedInCustomer = Boolean(state.currentUser) && !isAdmin;
+  const ownReview = isSignedInCustomer
+    ? reviews.find(review => String(review.userId || "") === String(state.currentUser.id || state.currentUser.email || ""))
+    : null;
 
-  container.innerHTML = `<h3>Customer Reviews</h3><br><div class="detail-reviews-container"></div>`;
-  const list = container.querySelector(".detail-reviews-container");
+  const composeForm = isAdmin
+    ? `<div class="review-role-notice admin"><strong>Admin mode:</strong> customer ratings are read-only here. Use <em>Dashboard → Products → Reviews</em> to moderate or remove harmful comments.</div>`
+    : !isSignedInCustomer
+      ? `<div class="review-role-notice"><strong>Want to leave a review?</strong><p>Sign in or create an account to rate this product and share your experience.</p><button class="btn btn-outline review-login-btn" type="button">Sign in to review</button></div>`
+      : `<form class="review-compose-form" id="review-compose-form" novalidate>
+          <div class="review-compose-top"><strong>${ownReview ? "Update your review" : "Write a review"}</strong><span>Rate your COREX experience</span></div>
+          <div class="review-star-picker" role="radiogroup" aria-label="Your rating">
+            ${[1,2,3,4,5].map(value => `<button type="button" class="review-star-choice ${(ownReview?.rating || 5) >= value ? "selected" : ""}" data-rating="${value}" aria-label="${value} star${value > 1 ? "s" : ""}">★</button>`).join("")}
+          </div>
+          <input type="hidden" id="review-rating-value" value="${ownReview?.rating || 5}">
+          <label class="review-comment-label" for="review-comment">Your comment</label>
+          <textarea id="review-comment" maxlength="500" required placeholder="Tell other shoppers about fit, comfort, quality or delivery…">${escapeReviewHtml(ownReview?.content || "")}</textarea>
+          <div class="review-form-footer"><span>Maximum 500 characters</span><button class="btn btn-primary" type="submit">${ownReview ? "Update Review" : "Publish Review"}</button></div>
+        </form>`;
 
-  demoReviews.forEach(r => {
-    let stars = "";
-    for (let i = 0; i < 5; i++) {
-      stars += `<svg viewBox="0 0 24 24" style="${i < Math.floor(r.rating) ? 'fill: #F5A623; stroke: #F5A623;' : 'fill: none; stroke: #ccc;'}"><polygon points="12,2 15,9 22,9 17,14 19,21 12,17 5,21 7,14 2,9 9,9" /></svg>`;
-    }
+  const reviewCards = reviews.length
+    ? reviews.map(review => `<article class="review-item">
+        <div class="review-header">
+          <div><span class="review-user">${escapeReviewHtml(review.name || "COREX Customer")}</span>${review.verifiedPurchase ? '<span class="verified-review-badge">Verified purchase</span>' : ""}</div>
+          <span class="review-date">${formatReviewDate(review.createdAt)}</span>
+        </div>
+        <div class="review-rating">${starsMarkup(review.rating, { size: 13, label: `${review.rating} out of 5 stars` })}</div>
+        <p class="review-content">${escapeReviewHtml(review.content)}</p>
+      </article>`).join("")
+    : `<div class="reviews-empty-state"><strong>No customer reviews yet.</strong><span>Be the first to share your experience with this product.</span></div>`;
 
-    const item = document.createElement("div");
-    item.className = "review-item";
-    item.innerHTML = `
-      <div class="review-header">
-        <span class="review-user">${r.name}</span>
-        <span class="review-date">${r.date}</span>
-      </div>
-      <div class="review-rating">${stars}</div>
-      <p class="review-content">${r.content}</p>
-    `;
-    list.appendChild(item);
+  container.innerHTML = `
+    <div class="review-summary-bar">
+      <div><span class="review-summary-number">${rating.toFixed(1)}</span>${starsMarkup(rating, { size: 16 })}</div>
+      <span>${reviewCount} rating${reviewCount === 1 ? "" : "s"} · ${reviews.length} review${reviews.length === 1 ? "" : "s"} shown</span>
+    </div>
+    ${composeForm}
+    <div class="detail-reviews-container">${reviewCards}</div>`;
+
+  if (!isSignedInCustomer && !isAdmin) {
+    container.querySelector(".review-login-btn")?.addEventListener("click", () => {
+      if (typeof window.openCorexAuthModal === "function") window.openCorexAuthModal("login", "Please sign in to write a product review.");
+    });
+  }
+
+  if (isSignedInCustomer) {
+    const form = container.querySelector("#review-compose-form");
+    const stars = [...container.querySelectorAll(".review-star-choice")];
+    const ratingInput = container.querySelector("#review-rating-value");
+    const syncStars = value => stars.forEach(button => button.classList.toggle("selected", Number(button.dataset.rating) <= Number(value)));
+    stars.forEach(button => button.addEventListener("click", () => { ratingInput.value = button.dataset.rating; syncStars(ratingInput.value); }));
+    form?.addEventListener("submit", async event => {
+      event.preventDefault();
+      const content = container.querySelector("#review-comment").value.trim();
+      const selectedRating = Number(ratingInput.value || 0);
+      if (selectedRating < 1 || selectedRating > 5) { showToast("Choose a rating from 1 to 5 stars.", "error"); return; }
+      if (content.length < 5) { showToast("Write at least 5 characters for your review.", "error"); return; }
+      const submitButton = form.querySelector('button[type="submit"]');
+      submitButton.disabled = true;
+      submitButton.textContent = "Saving…";
+      try {
+        await submitProductReview(product, selectedRating, content);
+      } catch (error) {
+        console.error("COREX review submit failed:", error);
+        showToast(error.message || "Could not save your review.", "error");
+      } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = ownReview ? "Update Review" : "Publish Review";
+      }
+    });
+  }
+}
+
+async function submitProductReview(product, rating, content) {
+  if (!requireAuthenticatedUser("write a product review")) return false;
+  if (isAdminUser()) throw new Error("Administrator accounts cannot post product ratings or comments.");
+  if (!window.CorexMockApi) throw new Error("MockAPI is unavailable. Please try again later.");
+
+  const remoteProducts = await window.CorexMockApi.listProducts();
+  const remoteProduct = (remoteProducts || []).find(item => String(item.legacyId ?? item.id) === String(product.id));
+  if (!remoteProduct) throw new Error("This product is not available for review sync yet.");
+
+  const currentUserId = String(state.currentUser.id || state.currentUser.email || "customer");
+  const existingReviews = window.CorexMockApi.getReviewItems(remoteProduct);
+  const hasPurchased = window.CorexMockApi.asArray(state.currentUser.orders).some(order =>
+    window.CorexMockApi.asArray(order.items).some(item => String(item.productId ?? item.id) === String(product.id))
+  );
+  const nextReview = {
+    id: `review-${Date.now()}`,
+    userId: currentUserId,
+    name: state.currentUser.fullName || state.currentUser.name || "COREX Customer",
+    email: state.currentUser.email || "",
+    rating: Number(rating),
+    content,
+    verifiedPurchase: hasPurchased,
+    createdAt: new Date().toISOString()
+  };
+  const existingIndex = existingReviews.findIndex(review => String(review.userId || "") === currentUserId);
+  const reviewItems = [...existingReviews];
+  if (existingIndex >= 0) reviewItems[existingIndex] = { ...reviewItems[existingIndex], ...nextReview, id: reviewItems[existingIndex].id || nextReview.id };
+  else reviewItems.push(nextReview);
+
+  const calculatedRating = product.isBestSeller ? 5 : window.CorexMockApi.calculateReviewAverage(reviewItems, product.rating);
+  const baselineCount = Math.max(Number(remoteProduct.reviews || 0), existingReviews.length);
+  const payload = window.CorexMockApi.productPayload({
+    ...remoteProduct,
+    reviewItems,
+    reviewsData: reviewItems,
+    rating: calculatedRating,
+    reviews: existingIndex >= 0 ? baselineCount : baselineCount + 1,
+    isBestSeller: Boolean(product.isBestSeller),
+    badge: product.isBestSeller ? "Best Seller" : remoteProduct.badge
   });
+  const saved = await window.CorexMockApi.updateProduct(remoteProduct.id, payload);
+  const normalized = hydrateProductReviewState(window.CorexMockApi.normalizeProduct(saved));
+  const index = PRODUCTS.findIndex(item => String(item.id) === String(product.id));
+  if (index >= 0) PRODUCTS[index] = { ...PRODUCTS[index], ...normalized, reviewItems: normalized.reviewItems };
+  state.activeProduct = index >= 0 ? PRODUCTS[index] : normalized;
+
+  const summaryRating = document.getElementById("detail-rating-num");
+  const summaryCount = document.getElementById("detail-rating-count");
+  const summaryStars = document.getElementById("detail-rating-stars");
+  if (summaryRating) summaryRating.textContent = getProductDisplayRating(state.activeProduct).toFixed(1);
+  if (summaryCount) summaryCount.textContent = `(${getProductReviewCount(state.activeProduct)} reviews)`;
+  if (summaryStars) summaryStars.innerHTML = starsMarkup(getProductDisplayRating(state.activeProduct), { size: 18 });
+  renderProductReviews(state.activeProduct);
+  showToast(existingIndex >= 0 ? "Your review has been updated." : "Thank you. Your review is now published.", "success");
+  return true;
 }
 
 function renderRecommendedProducts(product) {

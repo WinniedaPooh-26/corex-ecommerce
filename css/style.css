@@ -3824,3 +3824,37 @@ body.corex-admin-route .admin-dashboard-frame {
 }
 .mobile-admin-dashboard-link { color: var(--accent-primary) !important; font-weight: 800; }
 .compact-select { min-width: 110px; padding: .45rem .5rem; font-size: .78rem; }
+
+
+/* =========================================
+   REVIEW + RATING EXPERIENCE
+========================================= */
+.star-row { display:inline-flex; align-items:center; gap:2px; vertical-align:middle; }
+.product-card-rating .star-row { display:flex; }
+.review-summary-bar { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1rem 1.1rem; background:var(--card-bg); border:1px solid var(--border-color); border-radius:var(--radius-md); margin-bottom:1.25rem; }
+.review-summary-bar > div { display:flex; align-items:center; gap:.65rem; }
+.review-summary-number { font-size:1.55rem; font-weight:800; color:var(--text-primary); }
+.review-summary-bar > span { color:var(--text-secondary); font-size:.82rem; }
+.review-role-notice { padding:1rem 1.1rem; border:1px solid var(--border-color); border-radius:var(--radius-md); background:#fffdfb; margin-bottom:1.25rem; color:var(--text-secondary); font-size:.9rem; }
+.review-role-notice p { margin:.35rem 0 .75rem; }
+.review-role-notice.admin { border-color:#d7d1ca; background:#f8f6f3; }
+.review-login-btn { margin-top:.6rem; }
+.review-compose-form { padding:1.1rem; border:1px solid var(--border-color); background:#fff; border-radius:var(--radius-md); margin-bottom:1.5rem; }
+.review-compose-top { display:flex; align-items:baseline; justify-content:space-between; gap:.75rem; margin-bottom:.65rem; }
+.review-compose-top strong { color:var(--text-primary); }
+.review-compose-top span, .review-form-footer span { color:var(--text-secondary); font-size:.78rem; }
+.review-star-picker { display:flex; gap:.2rem; margin-bottom:.8rem; }
+.review-star-choice { color:#c8c8c8; font-size:1.65rem; line-height:1; padding:.1rem; transition:transform .15s ease,color .15s ease; }
+.review-star-choice:hover, .review-star-choice.selected { color:#F5A623; transform:translateY(-1px); }
+.review-comment-label { display:block; color:var(--text-primary); font-size:.84rem; font-weight:700; margin-bottom:.4rem; }
+.review-compose-form textarea { width:100%; min-height:96px; resize:vertical; border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:.75rem; font:inherit; color:var(--text-primary); }
+.review-compose-form textarea:focus { outline:none; border-color:var(--accent-primary); }
+.review-form-footer { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-top:.65rem; }
+.verified-review-badge { display:inline-flex; align-items:center; margin-left:.5rem; padding:.15rem .4rem; border-radius:999px; background:#eef7f0; color:#2d7a3e; font-size:.67rem; font-weight:700; }
+.review-header > div { display:flex; align-items:center; flex-wrap:wrap; gap:.25rem; }
+.reviews-empty-state { display:flex; flex-direction:column; gap:.35rem; padding:1.5rem 0; color:var(--text-secondary); }
+.reviews-empty-state strong { color:var(--text-primary); }
+@media (max-width: 620px) {
+  .review-summary-bar, .review-compose-top, .review-form-footer { align-items:flex-start; flex-direction:column; }
+  .review-summary-bar { gap:.45rem; }
+}

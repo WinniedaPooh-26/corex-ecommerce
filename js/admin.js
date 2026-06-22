@@ -112,8 +112,7 @@
         <label>Old price (VNĐ)<input name="oldPrice" type="number" min="0" step="1000" value="${product.oldPrice === null || product.oldPrice === undefined || product.oldPrice === "" ? "" : Math.round(Number(product.oldPrice) * VND_PER_PRICE_UNIT)}"></label>
         <label>Stock<input name="stock" type="number" min="0" step="1" value="${Number(product.stock ?? 100)}"></label>
         <label>Sold count<input name="soldCount" type="number" min="0" step="1" value="${Number(product.soldCount || 0)}"></label>
-        <label>Rating<input name="rating" type="number" min="0" max="5" step="0.1" value="${Number(product.rating || 0)}"></label>
-        <label>Reviews<input name="reviews" type="number" min="0" step="1" value="${Number(product.reviews || 0)}"></label>
+        <div class="admin-review-readonly"><strong>Customer review rating</strong><span>${Number(API.getDisplayRating(product) || 0).toFixed(1)} / 5 · ${Number(API.getReviewCount(product) || 0)} ratings</span><small>Ratings can only be created by customer accounts. Use the Reviews action to moderate comments.</small></div>
         <label class="full">Image URL / local path<input name="imageUrl" value="${escapeHtml(product.imageUrl || "images/women_1.png")}" required></label>
         <label class="full">Badge<input name="badge" value="${escapeHtml(product.badge || "")}" placeholder="Best Seller, New, Sale…"></label>
         <label class="full">Description<textarea name="description">${escapeHtml(product.description || "")}</textarea></label>
@@ -159,8 +158,9 @@
       oldPrice: value("oldPrice") === "" ? null : toCatalogPriceUnit(numeric("oldPrice")),
       stock: numeric("stock", 0),
       soldCount: numeric("soldCount", 0),
-      rating: numeric("rating", 0),
-      reviews: numeric("reviews", 0),
+      rating: existing.isBestSeller ? 5 : API.getDisplayRating(existing),
+      reviews: API.getReviewCount(existing),
+      reviewItems: API.getReviewItems(existing),
       imageUrl: value("imageUrl"),
       galleryImages: [value("imageUrl")],
       badge: value("badge") || null,
@@ -213,7 +213,7 @@
         <td>${Number(product.stock ?? 0)}</td>
         <td>${Number(product.soldCount ?? 0)}</td>
         <td>${labels.length ? labels.map((label, index) => `<span class="label-pill ${index ? "dark" : ""}">${escapeHtml(label)}</span>`).join("") : "—"}</td>
-        <td><div class="action-buttons"><button data-action="edit-product" data-id="${escapeHtml(product.id)}">Edit</button><button class="delete-btn" data-action="delete-product" data-id="${escapeHtml(product.id)}">Delete</button></div></td>
+        <td><div class="action-buttons"><button data-action="edit-product" data-id="${escapeHtml(product.id)}">Edit</button><button data-action="manage-reviews" data-id="${escapeHtml(product.id)}">Reviews (${API.getReviewItems(product).length})</button><button class="delete-btn" data-action="delete-product" data-id="${escapeHtml(product.id)}">Delete</button></div></td>
       </tr>`;
     }).join("") : `<tr><td colspan="7" class="empty-row">No products match the current search.</td></tr>`;
   }
@@ -431,11 +431,63 @@
     showToast(`Refreshed membership vouchers for ${customers.length} customer account(s).`);
   }
 
+
+  function reviewStarsText(rating) {
+    const count = Math.max(0, Math.min(5, Math.round(Number(rating || 0))));
+    return `${"★".repeat(count)}${"☆".repeat(5 - count)}`;
+  }
+
+  function openReviewManager(product) {
+    if (!product) return;
+    const reviews = API.getReviewItems(product).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    const body = `
+      <div class="admin-review-manager">
+        <div class="admin-review-summary"><strong>${escapeHtml(product.name)}</strong><span>${Number(API.getDisplayRating(product) || 0).toFixed(1)} / 5 · ${API.getReviewCount(product)} ratings</span></div>
+        <p class="admin-review-note">Administrators cannot post ratings or comments. You can remove comments that violate brand or community standards.</p>
+        <div class="admin-review-list">${reviews.length ? reviews.map(review => `
+          <article class="admin-review-card">
+            <div><strong>${escapeHtml(review.name || "COREX Customer")}</strong>${review.verifiedPurchase ? '<span class="verified-review-badge">Verified purchase</span>' : ""}<span class="admin-review-stars">${reviewStarsText(review.rating)}</span></div>
+            <small>${escapeHtml(dateText(review.createdAt))}</small>
+            <p>${escapeHtml(review.content)}</p>
+            <button type="button" class="delete-btn admin-delete-review" data-review-id="${escapeHtml(review.id)}" data-product-id="${escapeHtml(product.id)}">Delete comment</button>
+          </article>`).join("") : '<div class="empty-row">No customer reviews for this product.</div>'}</div>
+      </div>`;
+    openModal({
+      title: "Moderate customer reviews",
+      kicker: "PRODUCT REVIEW CONTROL",
+      body,
+      submitLabel: "Close",
+      onSubmit: async () => {}
+    });
+    $$(".admin-delete-review").forEach(button => button.addEventListener("click", async () => {
+      const current = state.products.find(item => String(item.id) === String(button.dataset.productId));
+      if (!current) return;
+      const review = API.getReviewItems(current).find(item => String(item.id) === String(button.dataset.reviewId));
+      if (!review || !window.confirm(`Delete this comment from ${review.name || "the customer"}?`)) return;
+      const reviewItems = API.getReviewItems(current).filter(item => String(item.id) !== String(button.dataset.reviewId));
+      const rating = current.isBestSeller ? 5 : API.calculateReviewAverage(reviewItems, current.rating);
+      const payload = API.productPayload({
+        ...current,
+        reviewItems,
+        reviewsData: reviewItems,
+        rating,
+        reviews: Math.max(0, Math.max(Number(current.reviews || 0), API.getReviewItems(current).length) - 1),
+        badge: current.isBestSeller ? "Best Seller" : current.badge
+      });
+      await API.updateProduct(current.id, payload);
+      await reloadData();
+      showToast("Customer review deleted from MockAPI.");
+      const refreshed = state.products.find(item => String(item.id) === String(current.id));
+      if (refreshed) openReviewManager(refreshed);
+    }));
+  }
+
   async function handleTableAction(event) {
     const button = event.target.closest("button[data-action]");
     if (!button) return;
     const { action, id } = button.dataset;
     if (action === "edit-product") return openProductEditor(state.products.find(product => String(product.id) === String(id)));
+    if (action === "manage-reviews") return openReviewManager(state.products.find(product => String(product.id) === String(id)));
     if (action === "edit-user") return openUserEditor(state.users.find(user => String(user.id) === String(id)));
     if (action === "apply-user-voucher") return applyVoucher(id);
     if (action === "save-order-status") return updateOrderStatus(button.dataset.userId, button.dataset.orderIndex, button.dataset.orderKey);
@@ -456,6 +508,8 @@
     // Persist the fixed administrator and populate an empty Product resource automatically.
     // This makes a newly created MockAPI project usable immediately after the first admin sign-in.
     await API.ensureAdminAccount();
+    await reloadData();
+    await API.ensureBestSellerReviewIntegrity(state.products);
     await reloadData();
 
     const seed = Array.isArray(window.COREX_CATALOG_SEED) ? window.COREX_CATALOG_SEED : [];

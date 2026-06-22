@@ -123,3 +123,19 @@ tr:last-child td { border-bottom: 0; }
 @media (max-width: 1060px) { .metric-grid { grid-template-columns: repeat(2, 1fr); }.dashboard-grid { grid-template-columns: 1fr; }.admin-dashboard { grid-template-columns: 210px minmax(0,1fr); } }
 @media (max-width: 760px) { .admin-login-screen { grid-template-columns: 1fr; }.login-art { display: none; }.login-panel { min-height: 100vh; }.admin-dashboard { display: block; }.admin-sidebar { position: static; height: auto; padding: 18px; }.admin-nav { grid-template-columns: repeat(2, 1fr); margin-top: 18px; }.sidebar-footer { grid-template-columns: 1fr 1fr; margin-top: 18px; }.admin-main { padding: 22px 15px 44px; }.admin-topbar, .section-toolbar { flex-direction: column; align-items: stretch; }.topbar-actions, .toolbar-actions { justify-content: stretch; }.topbar-actions > *, .toolbar-actions > * { flex: 1; }.toolbar-search input { width: 100%; }.metric-grid { grid-template-columns: 1fr 1fr; gap: 10px; }.metric-card { padding: 15px; }.sync-summary, .form-grid, .form-grid.three { grid-template-columns: 1fr; }.modal-card { max-height: 92vh; }.modal-form { padding: 18px; } }
 @media (max-width: 440px) { .metric-grid { grid-template-columns: 1fr; }.admin-nav { grid-template-columns: 1fr; }.sidebar-footer { grid-template-columns: 1fr; }.admin-topbar h1 { font-size: 1.85rem; } }
+
+
+/* Review moderation */
+.admin-review-readonly { display:flex; flex-direction:column; gap:.28rem; padding:.8rem; border:1px solid var(--border); border-radius:10px; background:#faf9f7; }
+.admin-review-readonly span { font-weight:800; color:var(--text-primary); }
+.admin-review-readonly small, .admin-review-note { color:var(--text-secondary); font-size:.82rem; line-height:1.45; }
+.admin-review-manager { display:flex; flex-direction:column; gap:1rem; }
+.admin-review-summary { display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.8rem 1rem; border-radius:10px; background:#f8f6f3; }
+.admin-review-summary span { color:var(--text-secondary); font-size:.86rem; }
+.admin-review-list { display:grid; gap:.75rem; max-height:420px; overflow:auto; padding-right:.25rem; }
+.admin-review-card { border:1px solid var(--border); border-radius:10px; padding:.9rem; }
+.admin-review-card > div { display:flex; align-items:center; gap:.45rem; flex-wrap:wrap; }
+.admin-review-card small { display:block; margin-top:.25rem; color:var(--text-secondary); }
+.admin-review-card p { margin:.6rem 0 .75rem; line-height:1.5; white-space:pre-wrap; }
+.admin-review-stars { color:#f5a623; font-size:.85rem; letter-spacing:1px; }
+.admin-delete-review { font-size:.78rem; }
